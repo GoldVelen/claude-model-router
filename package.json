@@ -1,0 +1,38 @@
+{
+  "name": "claude-model-router",
+  "version": "0.1.0",
+  "description": "Lightweight Anthropic-format API router for Claude Code. Switch between DeepSeek, Anthropic-compatible endpoints, and middleman providers in one session via /model.",
+  "keywords": [
+    "claude-code",
+    "anthropic",
+    "api-router",
+    "deepseek",
+    "llm-proxy"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "cmr": "./bin/cmr.js"
+  },
+  "main": "./dist/server.js",
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test --import tsx tests/**/*.test.ts",
+    "start": "tsx src/server.ts",
+    "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
