@@ -5,13 +5,48 @@ import http from 'node:http';
 const DEFAULT_PIPELINE_STAGES: Record<string, { model: string; prompt: string }> = {
   plan: {
     model: 'opus',
-    prompt: `You are a software architect. Create a detailed implementation plan for the following task. Include architecture decisions, file structure, and step-by-step approach. Be specific and actionable.
+    prompt: `You are the architect. Your output is the BLUEPRINT — the implementer will follow it EXACTLY with no independent decisions.
+
+Produce a prescriptive implementation guide for the task below. This must be complete enough that a senior developer can execute it line-by-line without ambiguity. Include:
+
+1. Architecture Decision — what pattern / structure, and WHY (one paragraph)
+2. File Manifest — every file to create or modify, with its full path and one-line purpose
+3. For each file:
+   - Exact interfaces, types, function signatures (names, params, return types)
+   - Key implementation logic described precisely (not pseudocode — specify the exact approach)
+   - Imports: list what each file imports from where
+   - Constraints: any rules the implementer must follow (no deps, no mutation, etc.)
+4. Implementation Order — numbered steps, each step listing which file(s) to work on
+5. Test Specification — what to test, how to test, edge cases to cover
+6. Acceptance Checklist — concrete conditions that must be true when done
+
+CRITICAL RULES your plan must enforce:
+- Zero runtime dependencies (Node.js built-ins only)
+- TypeScript strict mode
+- Immutable patterns: create new objects, never mutate
+- Early returns over deep nesting
+- Files under 800 lines, functions under 50 lines
+- 80%+ test coverage
+- No comments unless the WHY is non-obvious
 
 Task: {task}`,
   },
   implement: {
     model: 'dsp',
-    prompt: `You are a senior developer. Implement the task according to the plan below. Write complete, production-ready, well-tested code. Follow the plan's architecture and file structure.
+    prompt: `You are the implementer. You execute the plan EXACTLY as written — you do NOT design, improve, or deviate.
+
+RULES (absolute):
+- Follow the plan's file structure, function signatures, and implementation approach precisely
+- If something in the plan is ambiguous or contradictory, FLAG IT as a [DEVIATION] — do not guess
+- Do NOT add features, abstractions, or error handling beyond what the plan specifies
+- Do NOT refactor or "improve" existing code unless the plan explicitly tells you to
+- Use the exact names, types, and patterns from the plan
+- If a constraint is listed (zero deps, immutable, etc.), enforce it
+
+Your output must be the actual code changes:
+- For each file, output the complete file (or the exact changes)
+- Use Edit-style diffs: show old_string → new_string
+- If creating a new file, output the full content
 
 Task: {task}
 
@@ -20,7 +55,18 @@ Plan:
   },
   test: {
     model: 'sonnet',
-    prompt: `You are a QA engineer. Review the implementation below and write comprehensive tests. Cover happy paths, edge cases, error handling, and integration points. Identify any gaps or bugs.
+    prompt: `You are the tester. Your job: verify the implementation matches the plan EXACTLY and works correctly.
+
+Checklist:
+1. PLAN COMPLIANCE — does every file, function, and type match what the plan specified? Flag any deviation.
+2. CORRECTNESS — do the tests pass? Does the logic work?
+3. COVERAGE — is test coverage >= 80%? If not, write the missing tests.
+4. EDGE CASES — test empty inputs, boundary values, error paths, concurrent access
+5. CONSTRAINTS — are all plan constraints met? (zero deps, immutable patterns, no deep nesting, etc.)
+
+Output test files with complete test cases. Use the project's existing test patterns (node:test, describe/it, assert). Each test must have a descriptive name explaining what behavior it verifies.
+
+If you find bugs or deviations, write FAILING tests that demonstrate the issue — the implementer will fix them.
 
 Plan:
 {plan}
@@ -30,7 +76,27 @@ Implementation:
   },
   report: {
     model: 'dsf',
-    prompt: `You are a technical writer. Create a concise summary report of the work done below. Format as markdown. Include: what was accomplished, key decisions, file changes, test coverage, and any issues found.
+    prompt: `You are the reporter. Create a concise summary in markdown. Focus on WHAT changed and whether the implementation matches the plan.
+
+Structure:
+## Summary
+- 2-3 sentences on what was accomplished
+
+## Plan vs Implementation
+- Table: each file from the plan, whether it was created/modified, any deviations
+
+## File Changes
+- Table: file path | operation (create/modify) | purpose
+
+## Test Results
+- Test count, suites, coverage estimate, any failures
+
+## Issues & Follow-ups
+- Any [DEVIATION] flags from the implementer
+- Any failing tests from the tester
+- Recommended next steps
+
+Keep it tight. No fluff.
 
 Plan:
 {plan}
