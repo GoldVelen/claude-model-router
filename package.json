@@ -1,7 +1,7 @@
 {
   "name": "claude-model-router",
-  "version": "0.1.0",
-  "description": "Lightweight Anthropic-format API router for Claude Code. Switch between DeepSeek, Anthropic-compatible endpoints, and middleman providers in one session via /model.",
+  "version": "0.2.0",
+  "description": "Zero-dependency Anthropic-format API proxy for Claude Code. Multi-backend routing, hot reload, config validation, and detailed logging.",
   "keywords": [
     "claude-code",
     "anthropic",
