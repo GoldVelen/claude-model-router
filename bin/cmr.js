@@ -286,16 +286,16 @@ async function cmdRun(task) {
   console.log(`\nTask: ${task}`);
   console.log('─'.repeat(60));
 
-  let interrupted = false;
+  const controller = new AbortController();
   const onSigint = () => {
-    interrupted = true;
     process.stderr.write('\n[INTERRUPTED] Saving checkpoint...\n');
+    controller.abort();
   };
   process.on('SIGINT', onSigint);
 
   let result;
   try {
-    result = await runPipeline(task, config, port);
+    result = await runPipeline(task, config, port, { signal: controller.signal });
   } catch (err) {
     process.removeListener('SIGINT', onSigint);
     const message = err instanceof Error ? err.message : String(err);
@@ -305,14 +305,12 @@ async function cmdRun(task) {
 
   process.removeListener('SIGINT', onSigint);
 
-  if (interrupted && result) {
+  if (result?.abortedAt) {
     const runDir = join(DATA_DIR, 'runs');
     ensureDir(runDir);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const checkpointPath = join(runDir, `${timestamp}.json`);
-    const currentIdx = result.stages.findIndex(
-      (s) => !result.ctx[s] || result.ctx[s]?.startsWith?.('[ERROR')
-    );
+    const currentIdx = result.stages.indexOf(result.abortedAt);
     writeFileSync(checkpointPath, JSON.stringify({
       task,
       stages: result.stages,

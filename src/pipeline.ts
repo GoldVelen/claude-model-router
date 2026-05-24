@@ -213,6 +213,7 @@ export interface PipelineResult {
   stages: string[];
   failedStages: string[];
   timedOutStages: string[];
+  abortedAt: string | null;
 }
 
 function formatDuration(ms: number): string {
@@ -224,7 +225,7 @@ export async function runPipeline(
   task: string,
   config: Config,
   port: number,
-  options?: { timeoutPerStage?: number },
+  options?: { timeoutPerStage?: number; signal?: AbortSignal },
 ): Promise<PipelineResult> {
   const stages = getPipelineStages(config);
   const stageNames = Object.keys(stages);
@@ -235,6 +236,9 @@ export async function runPipeline(
   const defaultTimeout = options?.timeoutPerStage ?? 300_000;
 
   for (let i = 0; i < stageNames.length; i++) {
+    if (options?.signal?.aborted) {
+      return { ctx, stages: stageNames, failedStages, timedOutStages, abortedAt: stageNames[i] ?? null };
+    }
     const name = stageNames[i]!;
     const stage = stages[name]!;
     const model = resolveStageModel(stage.model, config);
@@ -273,5 +277,5 @@ export async function runPipeline(
     }
   }
 
-  return { ctx, stages: stageNames, failedStages, timedOutStages };
+  return { ctx, stages: stageNames, failedStages, timedOutStages, abortedAt: null };
 }
