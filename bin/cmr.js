@@ -18,11 +18,13 @@ function ensureDir(dir) {
 function cmdStart() {
   if (existsSync(PID_PATH)) {
     const pid = readFileSync(PID_PATH, 'utf-8').trim();
-    try {
-      process.kill(Number(pid), 0);
-      console.log(`Already running (pid ${pid})`);
-      return;
-    } catch { /* stale pid */ }
+    if (pid.length > 0) {
+      try {
+        process.kill(Number(pid), 0);
+        console.log(`Already running (pid ${pid})`);
+        return;
+      } catch { /* stale pid */ }
+    }
   }
 
   ensureDir(DATA_DIR);
