@@ -1,34 +1,47 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
+
+### Features
+
+- auto fallback with degraded backend tracking
+- TUI dashboard (real-time health, stats, logs)
+- Web management UI at /web
+- stats/health monitoring (cmr stats, cmr health)
+- pipeline progress output, per-stage timeout, and Ctrl+C checkpoint/resume
+- multi-input pipeline modes (interactive, --file, --stdin, args)
+- setup guard prompts for setup if config missing
 
 ### Bug Fixes
 
-- enforce strict plan-to-implementation pipeline discipline (2026-05-24)
-- empty PID file falsely detected as running (2026-05-24)
-
-### Features
-
-- improve CLI daemon, add setup and pipeline commands (2026-05-24)
-- add pipeline engine for auto model dispatch (2026-05-24)
-- multi-backend routing with modelPattern, enhanced logging (2026-05-24)
-- add config validation and hot reload (2026-05-24)
+- correct public/index.html path resolution in web route
+- dashboard non-TTY guard
+- pipeline SIGINT now aborts mid-stage via AbortSignal
 
 ### Documentation
 
-- update README and package.json for v0.2.0 (2026-05-24)
-- bilingual README (EN/CN) (2026-05-24)
+- README v0.3.0 features section
+- architecture diagram in README
+- bilingual updates (EN/CN)
 
-### Tests
-
-- add validator, watcher, and integration tests (2026-05-24)
-
-## v0.1.0
+## v0.2.0
 
 ### Features
 
-- initial release (2026-05-24)
+- pipeline engine for auto model dispatch
+- multi-backend routing with modelPattern
+- config validation and hot reload
+- CLI daemon, setup and pipeline commands
 
-### Chores
+### Bug Fixes
 
-- init project skeleton (2026-05-24)
+- empty PID file falsely detected as running
+- strict plan-to-implementation pipeline discipline
+
+### Documentation
+
+- bilingual README (EN/CN)
+
+## v0.1.0
+
+- initial release

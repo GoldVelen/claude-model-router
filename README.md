@@ -46,6 +46,8 @@ cmr status     # Verify it's running
 
 If no config exists, `cmr start` and other commands will prompt you to run `cmr setup` first.
 
+After starting, visit `http://127.0.0.1:3457/web` for the web management UI.
+
 ## Install / 安装
 
 ```bash
@@ -177,7 +179,7 @@ cmr stats  # Check failure counts and degraded status
 
 ### Real-time Dashboard / 实时面板
 
-**`cmr dashboard`** provides a live terminal dashboard with backend health, request stats, and recent logs — all updating every second. Press `q` to quit.
+**`cmr dashboard`** provides a live terminal dashboard with backend health, request stats, and recent logs — all updating every second. Press `q` to quit. Requires an interactive terminal at least 80 columns wide.
 
 ### Web Management UI
 
@@ -186,6 +188,8 @@ Visit `http://127.0.0.1:3457/web` for a browser-based management interface:
 - Edit configuration with save and reload
 - Run pipeline tasks
 - Watch live logs
+
+> **Security note**: Web UI binds to localhost only. Do not expose port 3457 to public networks.
 
 ### Pipeline Enhancements
 
@@ -222,19 +226,51 @@ Edit the `aliases` section in your config / 编辑配置中的 `aliases` 字段�
 
 ## Upgrade from v0.1.x / 从 v0.1.x 升级
 
-cmr v0.2.0 is fully backward-compatible with your existing `config.json`. On first load:
+cmr v0.3.0 is fully backward-compatible with v0.1.x and v0.2.x configs. On first load:
 
 1. The old `backends` format (with `url` + `apiKey` only) is auto-migrated to the new format with default `path`, `modelPattern`, and `sanitizer` values
 2. Environment variables `CMR_DEEPSEEK_KEY` and `CMR_CLAUDE_KEY` still work
 3. Logging now displays backend URL hostnames instead of hardcoded service names
 4. The hot reload watcher is automatically active — no configuration needed
 
+## Architecture / 架构
+
+```
+src/
+├── server.ts             HTTP server with retry loop & fallback
+├── router.ts             Backend selection (modelPattern + degraded filter)
+├── pipeline.ts           Multi-stage model orchestration
+├── config.ts             Config load + hot reload + env override
+├── watcher.ts            fs.watch on config.json
+├── validator.ts          Config schema validation
+├── sanitize.ts           DeepSeek request sanitizer
+├── stats/                Per-backend metrics (immutable store)
+│   ├── stats-store.ts    State + recordRequest/recordFailure/isDegraded
+│   ├── stats-middleware.ts res.writeHead/end interception
+│   └── stats-types.ts
+├── server/routes/        HTTP endpoints
+│   ├── stats.ts          GET /stats
+│   ├── logs.ts           GET /logs
+│   ├── web.ts            GET /web (serves public/index.html)
+│   ├── api-config.ts     GET/POST /api/config
+│   ├── api-run.ts        POST /api/run, GET /api/run/:id
+│   └── api-logs.ts       GET /api/logs
+├── commands/             CLI commands (used by bin/cmr.js)
+│   ├── stats.ts
+│   └── health.ts
+└── utils/
+    ├── http-client.ts    Backend reachability check
+    └── changelog-generator.ts
+```
+
+Zero runtime dependencies — only Node.js built-ins.
+
 ## Tech / 技术栈
 
 - **Runtime**: Node.js ≥ 18 (ESM)
 - **Language**: TypeScript (strict mode)
 - **Dependencies**: 0 runtime dependencies
-- **Test**: Node.js built-in test runner, 75 tests across 23 suites
+- **Test**: Node.js built-in test runner, 88 tests across 27 suites
 - **Dist**: npm package with `cmr` CLI
 
 ## License / 许可
