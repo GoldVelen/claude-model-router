@@ -1,11 +1,12 @@
 import http from 'node:http';
 import https from 'node:https';
-import { type Config, type Backend } from './types.js';
-import { resolveModel, getRouteLabel } from './router.js';
+import { type BackendConfig } from './types.js';
+import { resolveModel, selectBackend } from './router.js';
 import { sanitizeForDeepseek } from './sanitize.js';
+import { getConfig } from './config.js';
 
 function proxyRequest(
-  backend: Backend,
+  backend: BackendConfig,
   path: string,
   body: string,
   res: http.ServerResponse,
@@ -24,28 +25,38 @@ function proxyRequest(
     },
   };
 
+  const startTime = Date.now();
   const lib = isSecure ? https : http;
   const proxyReq = lib.request(opts, (proxyRes) => {
+    const latency = Date.now() - startTime;
     const headers = { ...proxyRes.headers };
     delete headers['content-encoding'];
+
+    const config = getConfig();
+    if (config.logLevel !== 'silent') {
+      const hostname = url.hostname;
+      console.log(`[${new Date().toISOString()}] ${hostname} ${proxyRes.statusCode} ${latency}ms`);
+    }
+
     res.writeHead(proxyRes.statusCode ?? 502, headers);
     proxyRes.pipe(res);
   });
 
-  proxyReq.on('error', () => {
+  proxyReq.on('error', (err) => {
     res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: 'upstream request failed' } }));
+    res.end(JSON.stringify({
+      error: {
+        message: 'upstream request failed',
+        details: err.message,
+        backend: backend.url,
+      },
+    }));
   });
 
   proxyReq.end(body);
 }
 
-function logLine(model: string, resolved: string, backend: string): string {
-  const label = model === resolved ? model : `${model}→${resolved}`;
-  return `[${new Date().toISOString()}] ${label} → ${backend}`;
-}
-
-export function createServer(config: Config): http.Server {
+export function createServer(): http.Server {
   return http.createServer((req, res) => {
     if (req.method !== 'POST') {
       res.writeHead(404).end();
@@ -56,22 +67,30 @@ export function createServer(config: Config): http.Server {
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
       try {
+        const config = getConfig();
         const parsed = JSON.parse(body) as { model?: string };
         const rawModel = parsed.model ?? '';
         const resolvedModel = resolveModel(rawModel, config.aliases);
-        const isClaudeRoute = resolvedModel.startsWith('claude-');
 
         let forwarded = body;
         if (resolvedModel !== rawModel) {
           forwarded = body.replace(`"${rawModel}"`, `"${resolvedModel}"`);
         }
 
-        const backend = isClaudeRoute ? config.backends.claude : config.backends.deepseek;
-        const path = isClaudeRoute ? '/v1/messages' : '/anthropic/v1/messages';
-        const actualBody = isClaudeRoute ? forwarded : sanitizeForDeepseek(forwarded);
+        const backend = selectBackend(resolvedModel, config.backends);
+        if (!backend) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: `No backend configured for model: ${resolvedModel}` } }));
+          return;
+        }
+
+        const path = backend.path || '/v1/messages';
+        const actualBody = backend.sanitizer === 'deepseek' ? sanitizeForDeepseek(forwarded) : forwarded;
 
         if (config.logLevel !== 'silent') {
-          console.log(logLine(rawModel, resolvedModel, isClaudeRoute ? 'api.anthropic.com' : 'api.deepseek.com'));
+          const hostname = new URL(backend.url).hostname;
+          const label = rawModel === resolvedModel ? rawModel : `${rawModel}→${resolvedModel}`;
+          console.log(`[${new Date().toISOString()}] ${label} → ${hostname}`);
         }
 
         proxyRequest(backend, path, actualBody, res);

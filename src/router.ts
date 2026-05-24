@@ -1,12 +1,25 @@
-import { type Config } from './types.js';
+import { type Config, type BackendConfig } from './types.js';
 import { sanitizeForDeepseek } from './sanitize.js';
 
 export function resolveModel(raw: string, aliases: Record<string, string>): string {
   return aliases[raw] ?? raw;
 }
 
-export function isClaude(model: string): boolean {
-  return model.startsWith('claude-');
+export function selectBackend(
+  model: string,
+  backends: Record<string, BackendConfig>,
+): BackendConfig | null {
+  for (const [, backend] of Object.entries(backends)) {
+    if (!backend.modelPattern) continue;
+
+    const regex = new RegExp(backend.modelPattern);
+    if (regex.test(model)) {
+      return backend;
+    }
+  }
+
+  const first = Object.values(backends)[0];
+  return first || null;
 }
 
 export interface RouteResult {
@@ -21,24 +34,18 @@ export function routeRequest(config: Config, body: string): RouteResult {
   const rawModel = rawBody.model ?? '';
   const resolvedModel = resolveModel(rawModel, config.aliases);
 
-  if (isClaude(resolvedModel)) {
-    return {
-      url: config.backends.claude.url,
-      path: '/v1/messages',
-      apiKey: config.backends.claude.apiKey,
-      body: body.replace(`"${rawModel}"`, `"${resolvedModel}"`),
-    };
+  const backend = selectBackend(resolvedModel, config.backends);
+  if (!backend) {
+    return { url: '', path: '/v1/messages', apiKey: '', body };
   }
 
-  const sanitized = body.replace(`"${rawModel}"`, `"${resolvedModel}"`);
-  return {
-    url: config.backends.deepseek.url,
-    path: '/anthropic/v1/messages',
-    apiKey: config.backends.deepseek.apiKey,
-    body: sanitizeForDeepseek(sanitized),
-  };
-}
+  const forwarded = body.replace(`"${rawModel}"`, `"${resolvedModel}"`);
+  const actualBody = backend.sanitizer === 'deepseek' ? sanitizeForDeepseek(forwarded) : forwarded;
 
-export function getRouteLabel(model: string): string {
-  return isClaude(model) ? 'api.anthropic.com' : 'api.deepseek.com';
+  return {
+    url: backend.url,
+    path: backend.path || '/v1/messages',
+    apiKey: backend.apiKey,
+    body: actualBody,
+  };
 }
