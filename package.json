@@ -1,6 +1,6 @@
 {
   "name": "claude-model-router",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Zero-dependency Anthropic-format API proxy for Claude Code. Multi-backend routing, hot reload, config validation, and detailed logging.",
   "keywords": [
     "claude-code",
@@ -18,14 +18,17 @@
   "files": [
     "dist",
     "bin",
+    "public",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
-    "test": "node --test --import tsx tests/**/*.test.ts",
+    "test": "node --test --import tsx tests/*.test.ts tests/**/*.test.ts",
     "start": "tsx src/server.ts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "changelog": "tsx scripts/generate-changelog.ts"
   },
   "engines": {
     "node": ">=18.0.0"

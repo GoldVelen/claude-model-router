@@ -208,25 +208,70 @@ export function callModel(
   });
 }
 
+export interface PipelineResult {
+  ctx: PipelineContext;
+  stages: string[];
+  failedStages: string[];
+  timedOutStages: string[];
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 export async function runPipeline(
   task: string,
   config: Config,
   port: number,
-): Promise<{ ctx: PipelineContext; stages: string[] }> {
+  options?: { timeoutPerStage?: number },
+): Promise<PipelineResult> {
   const stages = getPipelineStages(config);
   const stageNames = Object.keys(stages);
+  const total = stageNames.length;
   const ctx: PipelineContext = { task };
+  const failedStages: string[] = [];
+  const timedOutStages: string[] = [];
+  const defaultTimeout = options?.timeoutPerStage ?? 300_000;
 
-  for (const name of stageNames) {
+  for (let i = 0; i < stageNames.length; i++) {
+    const name = stageNames[i]!;
     const stage = stages[name]!;
     const model = resolveStageModel(stage.model, config);
     const prompt = interpolatePrompt(stage.prompt, ctx);
+    const num = i + 1;
+    const stageTimeout = defaultTimeout;
 
-    process.stderr.write(`\n[${name}] running with model ${model}...\n`);
+    process.stderr.write(`[${num}/${total}] ${name} (${model}) running...\n`);
 
-    const result = await callModel(model, prompt, { port });
-    ctx[name] = result;
+    const startTime = Date.now();
+
+    try {
+      const result = await Promise.race([
+        callModel(model, prompt, { port, timeout: stageTimeout }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), stageTimeout)
+        ),
+      ]);
+
+      const duration = Date.now() - startTime;
+      process.stderr.write(`[${num}/${total}] ${name} completed in ${formatDuration(duration)}\n`);
+      ctx[name] = result;
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      const message = err instanceof Error ? err.message : String(err);
+
+      if (message.includes('timeout')) {
+        process.stderr.write(`[${num}/${total}] ${name} timeout after ${formatDuration(duration)}\n`);
+        timedOutStages.push(name);
+        ctx[name] = '[TIMEOUT]';
+      } else {
+        process.stderr.write(`[${num}/${total}] ${name} failed: ${message}\n`);
+        failedStages.push(name);
+        ctx[name] = `[ERROR: ${message}]`;
+      }
+    }
   }
 
-  return { ctx, stages: stageNames };
+  return { ctx, stages: stageNames, failedStages, timedOutStages };
 }

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Model Router</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #111; color: #e0e0e0; max-width: 960px; margin: 0 auto; padding: 20px; }
+  h1 { color: #fff; margin-bottom: 8px; }
+  .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 16px; }
+  .card h2 { font-size: 14px; color: #aaa; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .card.full { grid-column: 1 / -1; }
+  .stat { margin: 4px 0; font-size: 14px; }
+  .stat span { color: #0f0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #222; }
+  th { color: #888; font-weight: normal; }
+  .status-ok { color: #0f0; }
+  .status-degraded { color: #ff0; }
+  .status-down { color: #f00; }
+  #log-container { max-height: 300px; overflow-y: auto; font-size: 12px; color: #999; }
+  #log-container div { font-family: monospace; padding: 2px 0; border-bottom: 1px solid #1a1a1a; }
+  textarea, input { width: 100%; background: #0a0a0a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 13px; }
+  textarea { min-height: 80px; resize: vertical; }
+  button { background: #2563eb; color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #3b82f6; }
+  button.danger { background: #dc2626; }
+  button.danger:hover { background: #ef4444; }
+  .mb { margin-bottom: 8px; }
+  .error { color: #f00; font-size: 13px; }
+  .success { color: #0f0; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>Claude Model Router</h1>
+<p class="subtitle" id="status-line">Connecting...</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>Status</h2>
+    <p class="stat">Total Requests: <span id="total-reqs">-</span></p>
+    <p class="stat">Uptime: <span id="uptime">-</span></p>
+    <p class="stat">Started: <span id="start-time">-</span></p>
+    <p class="stat">HTTP Port: <span id="port">3457</span></p>
+  </div>
+
+  <div class="card">
+    <h2>Backend Health</h2>
+    <table>
+      <thead><tr><th>Backend</th><th>Status</th><th>Requests</th><th>Last</th></tr></thead>
+      <tbody id="backend-tbody"><tr><td colspan="4">No data</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card full">
+    <h2>Configuration</h2>
+    <textarea id="config-editor" class="mb"></textarea>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button onclick="loadConfig()">Refresh</button>
+      <button onclick="saveConfig()">Save</button>
+      <span id="config-msg"></span>
+    </div>
+  </div>
+
+  <div class="card full">
+    <h2>Pipeline Runner</h2>
+    <textarea id="pipeline-task" class="mb" placeholder="Enter task description..."></textarea>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button onclick="runPipeline()">Run Pipeline</button>
+      <span id="pipeline-msg"></span>
+    </div>
+  </div>
+
+  <div class="card full">
+    <h2>Recent Logs</h2>
+    <div id="log-container">Loading...</div>
+  </div>
+</div>
+
+<script>
+async function refreshStats() {
+  try {
+    const r = await fetch('/stats'); const d = await r.json();
+    document.getElementById('total-reqs').textContent = d.total;
+    document.getElementById('uptime').textContent = formatMs(d.uptime);
+    document.getElementById('start-time').textContent = d.startTime || '-';
+    const tbody = document.getElementById('backend-tbody');
+    const backends = Object.entries(d.backends || {});
+    if (backends.length === 0) tbody.innerHTML = '<tr><td colspan="4">No backends configured</td></tr>';
+    else tbody.innerHTML = backends.map(([n,s]) => {
+      const cf = s.consecutiveFailures || 0;
+      const status = cf === 0 ? 'ok' : cf < 3 ? 'degraded' : 'down';
+      return `<tr><td>${esc(n)}</td><td class="status-${status}">${status.toUpperCase()}</td><td>${s.count||0}</td><td>${(s.lastRequest||'').slice(0,19)||'never'}</td></tr>`;
+    }).join('');
+    document.getElementById('status-line').textContent = 'Connected';
+  } catch(e) {}
+}
+
+async function refreshLogs() {
+  try {
+    const r = await fetch('/api/logs'); const d = await r.json();
+    const container = document.getElementById('log-container');
+    container.innerHTML = (d.logs||[]).slice(-30).map(l=>`<div>${esc(l)}</div>`).join('')||'(no logs)';
+    container.scrollTop = container.scrollHeight;
+  } catch(e) {}
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config'); const d = await r.json();
+    document.getElementById('config-editor').value = JSON.stringify(d,null,2);
+    document.getElementById('config-msg').textContent = '';
+  } catch(e) { document.getElementById('config-msg').textContent = 'Failed to load config'; }
+}
+
+async function saveConfig() {
+  const msg = document.getElementById('config-msg');
+  try {
+    const data = JSON.parse(document.getElementById('config-editor').value);
+    const r = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const result = await r.json();
+    if (result.ok) { msg.className='success'; msg.textContent='Saved!'; }
+    else { msg.className='error'; msg.textContent=(result.errors||['Unknown']).join(', '); }
+  } catch(e) { msg.className='error'; msg.textContent=e.message; }
+}
+
+async function runPipeline() {
+  const msg = document.getElementById('pipeline-msg');
+  const task = document.getElementById('pipeline-task').value.trim();
+  if (!task) { msg.className='error'; msg.textContent='Enter a task description'; return; }
+  msg.className=''; msg.textContent='Running...';
+  try {
+    const r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task})});
+    const d = await r.json();
+    msg.className = d.jobId?'success':'error';
+    msg.textContent = d.jobId?`Submitted: ${d.jobId}`:(d.error||'Failed');
+  } catch(e) { msg.className='error'; msg.textContent=e.message; }
+}
+
+function formatMs(ms) {
+  if (!ms) return '0s';
+  const s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60);
+  if (h>0) return `${h}h ${m%60}m ${s%60}s`;
+  if (m>0) return `${m}m ${s%60}s`;
+  return `${s}s`;
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+loadConfig();
+setInterval(()=>{refreshStats();refreshLogs();}, 2000);
+refreshStats(); refreshLogs();
+</script>
+</body>
+</html>
