@@ -1,26 +1,18 @@
 import { type IncomingMessage, type ServerResponse } from 'node:http';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { getConfig, reloadConfig } from '../../config.js';
+import { getConfig, reloadConfig, getConfigPath } from '../../config.js';
 import { validateConfig } from '../../validator.js';
+import { redactConfig } from '../../utils/redact.js';
 
-const CONFIG_PATH = join(homedir(), '.config', 'claude-model-router', 'config.json');
+const CONFIG_PATH = getConfigPath();
 
 export function handleApiConfigRoute(req: IncomingMessage, res: ServerResponse): boolean {
   const url = req.url ?? '';
 
   if (req.method === 'GET' && url === '/api/config') {
-    const config = getConfig();
-    const redacted = {
-      ...config,
-      backends: Object.fromEntries(
-        Object.entries(config.backends).map(([name, b]) => [
-          name,
-          { ...b, apiKey: '***' },
-        ])
-      ),
-    };
+    const redacted = redactConfig(getConfig() as unknown as Record<string, unknown>);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(redacted));
     return true;
