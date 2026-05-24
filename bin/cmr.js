@@ -477,6 +477,10 @@ async function cmdHealth() {
 // ─── Dashboard ──────────────────────────────────────────────────────
 
 async function cmdDashboard() {
+  if (!process.stdin.isTTY) {
+    console.log('Dashboard requires an interactive terminal (TTY).');
+    process.exit(1);
+  }
   if (!isRunning()) {
     console.log('Proxy is not running. Start it first: cmr start');
     process.exit(1);
@@ -582,7 +586,7 @@ async function cmdDashboard() {
     }
 
     process.stdout.write('└' + '─'.repeat(58) + '┘\n');
-    process.stdout.write(`Press 'q' to quit, 'r' to refresh  │ Refresh: ${new Date().toLocaleTimeString()}\n`);
+    process.stdout.write(`Press 'q' to quit  │  Refresh: ${new Date().toLocaleTimeString()}\n`);
   }
 
   while (running) {
