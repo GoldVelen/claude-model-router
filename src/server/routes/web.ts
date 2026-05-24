@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { type IncomingMessage, type ServerResponse } from 'node:http';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const htmlPath = join(__dirname, '..', '..', 'public', 'index.html');
+const htmlPath = join(__dirname, '..', '..', '..', 'public', 'index.html');
 
 let htmlCache: string | null = null;
 
