@@ -1,8 +1,10 @@
 # claude-model-router
 
 > Lightweight reverse proxy for Claude Code that routes requests to different LLM backends based on model name — no more switching configs and restarting.
+>
+> 为 Claude Code 设计的轻量反向代理。根据模型名自动将请求路由到不同的 LLM 后端，会话内通过 `/model` 一键切换，无需重启。
 
-## How it works
+## How it works / 工作原理
 
 ```
 ┌─────────────┐     POST /v1/messages     ┌──────────────────┐
@@ -24,7 +26,7 @@
                                                         └─────────────────────┘
 ```
 
-## Install
+## Install / 安装
 
 ```bash
 npm install -g .
@@ -32,9 +34,9 @@ npm install -g .
 # npm install -g claude-model-router
 ```
 
-## Configure
+## Configure / 配置
 
-Create `~/.config/claude-model-router/config.json`:
+Create `~/.config/claude-model-router/config.json` / 创建配置文件：
 
 ```json
 {
@@ -60,35 +62,26 @@ Create `~/.config/claude-model-router/config.json`:
 }
 ```
 
-Keys can also be set via env vars:
+Keys can also be set via env vars / 也可以用环境变量设置：
 
-| Env var | Overrides |
+| Env var / 环境变量 | Overrides / 覆盖 |
 |---|---|
 | `CMR_PORT` | `config.port` |
 | `CMR_DEEPSEEK_KEY` | `config.backends.deepseek.apiKey` |
 | `CMR_CLAUDE_KEY` | `config.backends.claude.apiKey` |
 | `CMR_LOG_LEVEL` | `config.logLevel` |
 
-## Usage
+## Usage / 使用
 
 ```bash
-# Start the proxy (background daemon)
-cmr start
-
-# Check status
-cmr status
-
-# View recent logs
-cmr logs
-
-# Stop
-cmr stop
-
-# Restart
-cmr restart
+cmr start     # 启动后台守护进程 / start background daemon
+cmr status    # 检查状态 / check status
+cmr logs      # 查看最近日志 / view recent logs
+cmr stop      # 停止 / stop
+cmr restart   # 重启 / restart
 ```
 
-Then set in Claude Code settings (`~/.claude/settings.json`):
+Then set in Claude Code settings / 然后在 Claude Code 设置中添加 (`~/.claude/settings.json`):
 
 ```json
 "env": {
@@ -96,19 +89,19 @@ Then set in Claude Code settings (`~/.claude/settings.json`):
 }
 ```
 
-Now switch models mid-session with `/model`:
+Now switch models mid-session with `/model` / 现在可以用 `/model` 在会话内自由切换：
 
 ```
-/model opus   → claude-opus-4-7 via api.anthropic.com
-/model dsp    → deepseek-v4-pro via api.deepseek.com
-/model dsf    → deepseek-v4-flash via api.deepseek.com
-/model sonnet → claude-sonnet-4-6 via api.anthropic.com
-/model haiku  → claude-haiku-4-5 via api.anthropic.com
+/model opus   → claude-opus-4-7  via api.anthropic.com       (复杂任务)
+/model dsp    → deepseek-v4-pro  via api.deepseek.com  (主力)
+/model dsf    → deepseek-v4-flash via api.deepseek.com (便宜快速)
+/model sonnet → claude-sonnet-4-6 via api.anthropic.com       (均衡)
+/model haiku  → claude-haiku-4-5  via api.anthropic.com       (轻量)
 ```
 
-## Add custom aliases
+## Custom aliases / 自定义别名
 
-Edit the `aliases` section in your config:
+Edit the `aliases` section in your config / 编辑配置中的 `aliases` 字段：
 
 ```json
 {
@@ -120,6 +113,6 @@ Edit the `aliases` section in your config:
 }
 ```
 
-## License
+## License / 许可
 
 MIT
