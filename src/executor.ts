@@ -18,6 +18,7 @@ export interface ExecuteResult {
 function extractCodeBlocks(text: string): Array<{ filename: string; content: string }> {
   const blocks: Array<{ filename: string; content: string }> = [];
 
+  // Format 1: ```language:filepath
   const regex = /```(?:\w+)?:([^\n]+)\n([\s\S]*?)```/g;
   let match;
 
@@ -28,8 +29,9 @@ function extractCodeBlocks(text: string): Array<{ filename: string; content: str
     });
   }
 
+  // Format 2: File: path or ## File: path or **File N: path**
   if (blocks.length === 0) {
-    const fileRegex = /(?:File|文件):\s*([^\n]+)\n```[\w]*\n([\s\S]*?)```/gi;
+    const fileRegex = /(?:\*\*)?(?:File\s*\d*|文件):\s*`?([^\n`*]+?)`?\*\*?\s*(?:\(new file\))?\s*\n+```[\w]*\n([\s\S]*?)```/gi;
     while ((match = fileRegex.exec(text)) !== null) {
       blocks.push({
         filename: match[1]!.trim(),
