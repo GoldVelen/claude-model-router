@@ -1,64 +1,64 @@
 # claude-model-router
 
-> Lightweight reverse proxy for Claude Code that routes requests to different LLM backends based on model name — no more switching configs and restarting.
+> 为 Claude Code 设计的轻量反向代理。根据模型名自动将请求路由到不同的 LLM 后端，会话内通过 `/model` 一键切换，无需重启。
 >
-> [中文](./README.zh.md)
+> [English](./README.en.md)
 
-## Features
+## 特性
 
-- **Multi-backend routing** — Route models to any number of Anthropic-compatible backends (DeepSeek, OpenRouter, etc.) by configurable regex patterns
-- **Zero-dependency** — Only uses Node.js built-in modules
-- **Hot reload** — Edit `config.json` without restarting the proxy
-- **Config validation** — Clear error messages on invalid config
-- **Request sanitization** — DeepSeek support strips unsupported fields automatically
-- **Error transparency** — Upstream error details preserved in proxy responses
-- **Enhanced logging** — Response status codes and latency logged per request
+- **多后端路由** — 通过可配置的正则表达式将模型路由到任意数量的 Anthropic 兼容后端（DeepSeek、OpenRouter 等）
+- **零依赖** — 仅使用 Node.js 内置模块
+- **热重载** — 编辑 `config.json` 无需重启代理
+- **配置校验** — 无效配置时给出清晰的错误信息
+- **请求净化** — DeepSeek 支持自动剥离不支持的字段
+- **错误透明** — 上游错误详情保留在代理响应中
+- **增强日志** — 每次请求记录响应状态码和延迟
 
 ```
 ┌─────────────┐     POST /v1/messages     ┌──────────────────┐
-│  Claude     │ ────────────────────────── │  cmr (port 3457) │
+│  Claude     │ ────────────────────────── │  cmr (端口 3457) │
 │  Code       │  ANTHROPIC_BASE_URL=       │                  │
-│  (any       │  http://127.0.0.1:3457     │  reads model     │
-│   session)  │                            │  from request    │
+│  (任意      │  http://127.0.0.1:3457     │  从请求中读取    │
+│   会话)     │                            │  模型名          │
 └─────────────┘                            └────────┬─────────┘
                                                     │
                                      ┌──────────────┴──────────────┐
                                      │                             │
-                              model matches                   model matches
+                              模型匹配                         模型匹配
                               claude-*                        deepseek-*
                                      │                             │
                             ┌────────▼────────┐        ┌──────────▼──────────┐
                             │  Anthropic API  │        │  api.deepseek.com   │
                             │  /v1/messages   │        │  /anthropic/v1/     │
-                            │  (passthrough)  │        │  messages           │
-                            └─────────────────┘        │  (thinking stripped)│
+                            │  (直通)         │        │  messages           │
+                            └─────────────────┘        │  (移除 thinking)    │
                                                         └─────────────────────┘
 ```
 
-## Quick Start
+## 快速开始
 
 ```bash
 npm install -g claude-model-router
-cmr setup      # Interactive config wizard (first time only)
-cmr start      # Start proxy daemon
-cmr status     # Verify it's running
+cmr setup      # 交互式配置向导（仅首次）
+cmr start      # 启动后台守护进程
+cmr status     # 验证是否运行中
 ```
 
-If no config exists, `cmr start` and other commands will prompt you to run `cmr setup` first.
+如果尚未创建配置文件，`cmr start` 及其他命令会提示你先运行 `cmr setup`。
 
-After starting, visit `http://127.0.0.1:3457/web` for the web management UI.
+启动后访问 `http://127.0.0.1:3457/web` 进入 Web 管理界面。
 
-## Install
+## 安装
 
 ```bash
 npm install -g .
-# or from npm:
+# 或从 npm：
 # npm install -g claude-model-router
 ```
 
-## Configure
+## 配置
 
-Create `~/.config/claude-model-router/config.json`:
+创建 `~/.config/claude-model-router/config.json`：
 
 ```json
 {
@@ -88,43 +88,43 @@ Create `~/.config/claude-model-router/config.json`:
 }
 ```
 
-### Backend options
+### 后端选项
 
-| Field | Required | Default | Description |
+| 字段 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `url` | Yes | — | Backend API base URL |
-| `apiKey` | Yes | — | API key for authentication |
-| `path` | No | `/v1/messages` | Request path forwarded to backend |
-| `modelPattern` | No | — | Regex pattern to match model names against this backend |
-| `sanitizer` | No | `"none"` | Request sanitizer (`"deepseek"` strips `thinking` field and normalizes `tool_choice`) |
+| `url` | 是 | — | 后端 API 基础 URL |
+| `apiKey` | 是 | — | 认证 API 密钥 |
+| `path` | 否 | `/v1/messages` | 转发到后端的请求路径 |
+| `modelPattern` | 否 | — | 匹配模型名的正则表达式 |
+| `sanitizer` | 否 | `"none"` | 请求净化器（`"deepseek"` 剥离 `thinking` 字段并规范化 `tool_choice`） |
 
-### Env var overrides
+### 环境变量覆盖
 
-| Env var | Overrides |
+| 环境变量 | 覆盖 |
 |---|---|
 | `CMR_PORT` | `config.port` |
 | `CMR_DEEPSEEK_KEY` | `config.backends.deepseek.apiKey` |
 | `CMR_CLAUDE_KEY` | `config.backends.claude.apiKey` |
 | `CMR_LOG_LEVEL` | `config.logLevel` |
 
-Backend-specific env vars only affect backends named `deepseek` or `claude` (backward compatible).
+后端专属环境变量仅影响名为 `deepseek` 或 `claude` 的后端（向后兼容）。
 
-## Usage
+## 使用
 
 ```bash
-cmr setup     # Interactive config wizard (run first!)
-cmr start     # Start background daemon
-cmr status    # Check status
-cmr stats     # Per-backend request statistics
-cmr health    # Check backend reachability
-cmr dashboard # Real-time monitoring dashboard (press 'q' to quit)
-cmr logs      # View recent logs
-cmr stop      # Stop
-cmr restart   # Restart
-cmr run       # Run task through model pipeline
+cmr setup     # 交互式配置向导（首次运行！）
+cmr start     # 启动后台守护进程
+cmr status    # 检查状态
+cmr stats     # 各后端请求统计
+cmr health    # 检查后端可达性
+cmr dashboard # 实时监控面板（按 'q' 退出）
+cmr logs      # 查看最近日志
+cmr stop      # 停止
+cmr restart   # 重启
+cmr run       # 通过模型流水线运行任务
 ```
 
-Then set in Claude Code settings (`~/.claude/settings.json`):
+然后在 Claude Code 设置中添加（`~/.claude/settings.json`）：
 
 ```json
 "env": {
@@ -132,21 +132,21 @@ Then set in Claude Code settings (`~/.claude/settings.json`):
 }
 ```
 
-Now switch models mid-session with `/model`:
+现在可以用 `/model` 在会话内自由切换模型：
 
 ```
-/model opus   → claude-opus-4-7  via api.anthropic.com      (complex)
-/model dsp    → deepseek-v4-pro  via api.deepseek.com  (daily driver)
-/model dsf    → deepseek-v4-flash via api.deepseek.com (cheap & fast)
-/model sonnet → claude-sonnet-4-6 via api.anthropic.com      (balanced)
-/model haiku  → claude-haiku-4-5  via api.anthropic.com      (lightweight)
+/model opus   → claude-opus-4-7  via api.anthropic.com      (复杂任务)
+/model dsp    → deepseek-v4-pro  via api.deepseek.com  (日常主力)
+/model dsf    → deepseek-v4-flash via api.deepseek.com (便宜快速)
+/model sonnet → claude-sonnet-4-6 via api.anthropic.com      (均衡)
+/model haiku  → claude-haiku-4-5  via api.anthropic.com      (轻量)
 ```
 
-## v0.3.0 Features
+## v0.3.0 新功能
 
-### Stats & Health Monitoring
+### 统计与健康监控
 
-**`cmr stats`** shows per-backend request counts, failure tracking, and uptime:
+**`cmr stats`** 显示各后端请求数、故障追踪和运行时长：
 
 ```
 Proxy Statistics
@@ -160,7 +160,7 @@ Per-backend stats:
   claude            14          2026-05-25T14:22:08Z
 ```
 
-**`cmr health`** checks every backend's reachability:
+**`cmr health`** 检查每个后端的可达性：
 
 ```
 Backend Health Check
@@ -169,50 +169,50 @@ Backend Health Check
 ✓ claude          OK     https://api.anthropic.com
 ```
 
-### Auto Fallback
+### 自动容灾
 
-When a backend returns 401/403/5xx or connection errors, cmr automatically retries with the next matching backend. After 3 consecutive failures, a backend is marked as **degraded** and temporarily skipped.
+当后端返回 401/403/5xx 或连接错误时，cmr 自动尝试下一个匹配的后端。连续 3 次失败后，后端标记为**已降级**并暂时跳过。
 
 ```bash
-cmr stats  # Check failure counts and degraded status
+cmr stats  # 查看故障计数和降级状态
 ```
 
-### Real-time Dashboard
+### 实时面板
 
-**`cmr dashboard`** provides a live terminal dashboard with backend health, request stats, and recent logs — all updating every second. Press `q` to quit. Requires an interactive terminal at least 80 columns wide.
+**`cmr dashboard`** 提供实时终端面板，展示后端健康、请求统计和最近日志，每秒更新。按 `q` 退出。需要至少 80 列宽的交互式终端。
 
-### Web Management UI
+### Web 管理界面
 
-Visit `http://127.0.0.1:3457/web` for a browser-based management interface:
-- View stats and backend health
-- Edit configuration with save and reload
-- Run pipeline tasks
-- Watch live logs
+访问 `http://127.0.0.1:3457/web` 进入浏览器管理界面：
+- 查看统计和后端健康状态
+- 编辑配置并保存重载
+- 运行流水线任务
+- 实时日志
 
-> **Security note**: Web UI binds to localhost only. Do not expose port 3457 to public networks.
+> **安全提示**：Web 界面仅绑定 localhost。不要将 3457 端口暴露到公网。
 
-### Pipeline Enhancements
+### 流水线增强
 
-- **Multi-input modes**: `cmr run` (interactive), `cmr run <task>`, `cmr run --file task.txt`, `echo "task" | cmr run --stdin`
-- **Progress output**: `[1/4] plan (deepseek-v4-pro) completed in 12.3s`
-- **Fault tolerance**: Per-stage timeout, error recovery, Ctrl+C checkpoint & resume
-- **Resume**: `cmr run resume <run-id>` continues from last saved stage
+- **多种输入模式**：`cmr run`（交互式）、`cmr run <任务>`、`cmr run --file task.txt`、`echo "task" | cmr run --stdin`
+- **进度输出**：`[1/4] plan (deepseek-v4-pro) completed in 12.3s`
+- **容错**：每阶段超时、错误恢复、Ctrl+C 保存检查点并恢复
+- **恢复**：`cmr run resume <run-id>` 从上次保存的阶段继续
 
-### Hot Reload
+### 热重载
 
-Edit `config.json` anytime — cmr detects file changes and reloads automatically. No restart needed, no active sessions interrupted.
+随时编辑 `config.json` —— cmr 检测文件变更并自动重载。无需重启，不影响活跃会话。
 
-### Multi-Backend Routing
+### 多后端路由
 
-Add any number of backends with arbitrary names. Each backend declares a `modelPattern` (regex) to control which models it handles.
+添加任意数量、任意名称的后端。每个后端通过 `modelPattern`（正则）声明处理的模型范围。
 
-### Config Validation
+### 配置校验
 
-On startup and hot reload, cmr validates every config field. Invalid config on reload keeps the previous working version.
+启动和热重载时，cmr 校验每个配置字段。重载时遇到无效配置会保留上一个可用版本。
 
-## Custom aliases
+## 自定义别名
 
-Edit the `aliases` section in your config:
+编辑配置中的 `aliases` 字段：
 
 ```json
 {
@@ -224,55 +224,55 @@ Edit the `aliases` section in your config:
 }
 ```
 
-## Upgrade from v0.1.x
+## 从 v0.1.x 升级
 
-cmr v0.3.0 is fully backward-compatible with v0.1.x and v0.2.x configs. On first load:
+cmr v0.3.0 完全向后兼容 v0.1.x 和 v0.2.x 的配置。首次加载时：
 
-1. The old `backends` format (with `url` + `apiKey` only) is auto-migrated to the new format with default `path`, `modelPattern`, and `sanitizer` values
-2. Environment variables `CMR_DEEPSEEK_KEY` and `CMR_CLAUDE_KEY` still work
-3. Logging now displays backend URL hostnames instead of hardcoded service names
-4. The hot reload watcher is automatically active — no configuration needed
+1. 旧 `backends` 格式（仅含 `url` + `apiKey`）自动迁移为新格式，补充默认的 `path`、`modelPattern` 和 `sanitizer`
+2. 环境变量 `CMR_DEEPSEEK_KEY` 和 `CMR_CLAUDE_KEY` 仍然有效
+3. 日志现在显示后端 URL 主机名，而非硬编码的服务名
+4. 热重载监视器自动激活 —— 无需额外配置
 
-## Architecture
+## 架构
 
 ```
 src/
-├── server.ts             HTTP server with retry loop & fallback
-├── router.ts             Backend selection (modelPattern + degraded filter)
-├── pipeline.ts           Multi-stage model orchestration
-├── config.ts             Config load + hot reload + env override
-├── watcher.ts            fs.watch on config.json
-├── validator.ts          Config schema validation
-├── sanitize.ts           DeepSeek request sanitizer
-├── stats/                Per-backend metrics (immutable store)
-│   ├── stats-store.ts    State + recordRequest/recordFailure/isDegraded
-│   ├── stats-middleware.ts res.writeHead/end interception
+├── server.ts             HTTP 服务器，含重试循环和容灾
+├── router.ts             后端选择（modelPattern + 降级过滤）
+├── pipeline.ts           多阶段模型编排
+├── config.ts             配置加载 + 热重载 + 环境变量覆盖
+├── watcher.ts            监听 config.json 的 fs.watch
+├── validator.ts          配置 schema 校验
+├── sanitize.ts           DeepSeek 请求净化器
+├── stats/                各后端指标（不可变存储）
+│   ├── stats-store.ts    状态 + recordRequest/recordFailure/isDegraded
+│   ├── stats-middleware.ts res.writeHead/end 拦截
 │   └── stats-types.ts
-├── server/routes/        HTTP endpoints
+├── server/routes/        HTTP 端点
 │   ├── stats.ts          GET /stats
 │   ├── logs.ts           GET /logs
-│   ├── web.ts            GET /web (serves public/index.html)
+│   ├── web.ts            GET /web（提供 public/index.html）
 │   ├── api-config.ts     GET/POST /api/config
 │   ├── api-run.ts        POST /api/run, GET /api/run/:id
 │   └── api-logs.ts       GET /api/logs
-├── commands/             CLI commands (used by bin/cmr.js)
+├── commands/             CLI 命令（由 bin/cmr.js 调用）
 │   ├── stats.ts
 │   └── health.ts
 └── utils/
-    ├── http-client.ts    Backend reachability check
+    ├── http-client.ts    后端可达性检查
     └── changelog-generator.ts
 ```
 
-Zero runtime dependencies — only Node.js built-ins.
+零运行时依赖 —— 仅使用 Node.js 内置模块。
 
-## Tech
+## 技术栈
 
-- **Runtime**: Node.js ≥ 18 (ESM)
-- **Language**: TypeScript (strict mode)
-- **Dependencies**: 0 runtime dependencies
-- **Test**: Node.js built-in test runner, 88 tests across 27 suites
-- **Dist**: npm package with `cmr` CLI
+- **运行时**：Node.js ≥ 18（ESM）
+- **语言**：TypeScript（严格模式）
+- **依赖**：0 运行时依赖
+- **测试**：Node.js 内置测试运行器，88 个测试用例，27 个测试套件
+- **分发**：npm 包，包含 `cmr` CLI
 
-## License
+## 许可
 
 MIT

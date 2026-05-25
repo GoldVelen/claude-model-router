@@ -1,0 +1,278 @@
+# claude-model-router
+
+> Lightweight reverse proxy for Claude Code that routes requests to different LLM backends based on model name — no more switching configs and restarting.
+>
+> [中文](./README.md)
+
+## Features
+
+- **Multi-backend routing** — Route models to any number of Anthropic-compatible backends (DeepSeek, OpenRouter, etc.) by configurable regex patterns
+- **Zero-dependency** — Only uses Node.js built-in modules
+- **Hot reload** — Edit `config.json` without restarting the proxy
+- **Config validation** — Clear error messages on invalid config
+- **Request sanitization** — DeepSeek support strips unsupported fields automatically
+- **Error transparency** — Upstream error details preserved in proxy responses
+- **Enhanced logging** — Response status codes and latency logged per request
+
+```
+┌─────────────┐     POST /v1/messages     ┌──────────────────┐
+│  Claude     │ ────────────────────────── │  cmr (port 3457) │
+│  Code       │  ANTHROPIC_BASE_URL=       │                  │
+│  (any       │  http://127.0.0.1:3457     │  reads model     │
+│   session)  │                            │  from request    │
+└─────────────┘                            └────────┬─────────┘
+                                                    │
+                                     ┌──────────────┴──────────────┐
+                                     │                             │
+                              model matches                   model matches
+                              claude-*                        deepseek-*
+                                     │                             │
+                            ┌────────▼────────┐        ┌──────────▼──────────┐
+                            │  Anthropic API  │        │  api.deepseek.com   │
+                            │  /v1/messages   │        │  /anthropic/v1/     │
+                            │  (passthrough)  │        │  messages           │
+                            └─────────────────┘        │  (thinking stripped)│
+                                                        └─────────────────────┘
+```
+
+## Quick Start
+
+```bash
+npm install -g claude-model-router
+cmr setup      # Interactive config wizard (first time only)
+cmr start      # Start proxy daemon
+cmr status     # Verify it's running
+```
+
+If no config exists, `cmr start` and other commands will prompt you to run `cmr setup` first.
+
+After starting, visit `http://127.0.0.1:3457/web` for the web management UI.
+
+## Install
+
+```bash
+npm install -g .
+# or from npm:
+# npm install -g claude-model-router
+```
+
+## Configure
+
+Create `~/.config/claude-model-router/config.json`:
+
+```json
+{
+  "port": 3457,
+  "logLevel": "info",
+  "backends": {
+    "deepseek": {
+      "url": "https://api.deepseek.com",
+      "apiKey": "sk-your-deepseek-key",
+      "path": "/anthropic/v1/messages",
+      "modelPattern": "^deepseek-"
+    },
+    "claude": {
+      "url": "https://api.anthropic.com",
+      "apiKey": "sk-ant-your-key",
+      "path": "/v1/messages",
+      "modelPattern": "^claude-"
+    }
+  },
+  "aliases": {
+    "dsp": "deepseek-v4-pro",
+    "dsf": "deepseek-v4-flash",
+    "opus": "claude-opus-4-7",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku": "claude-haiku-4-5"
+  }
+}
+```
+
+### Backend options
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `url` | Yes | — | Backend API base URL |
+| `apiKey` | Yes | — | API key for authentication |
+| `path` | No | `/v1/messages` | Request path forwarded to backend |
+| `modelPattern` | No | — | Regex pattern to match model names against this backend |
+| `sanitizer` | No | `"none"` | Request sanitizer (`"deepseek"` strips `thinking` field and normalizes `tool_choice`) |
+
+### Env var overrides
+
+| Env var | Overrides |
+|---|---|
+| `CMR_PORT` | `config.port` |
+| `CMR_DEEPSEEK_KEY` | `config.backends.deepseek.apiKey` |
+| `CMR_CLAUDE_KEY` | `config.backends.claude.apiKey` |
+| `CMR_LOG_LEVEL` | `config.logLevel` |
+
+Backend-specific env vars only affect backends named `deepseek` or `claude` (backward compatible).
+
+## Usage
+
+```bash
+cmr setup     # Interactive config wizard (run first!)
+cmr start     # Start background daemon
+cmr status    # Check status
+cmr stats     # Per-backend request statistics
+cmr health    # Check backend reachability
+cmr dashboard # Real-time monitoring dashboard (press 'q' to quit)
+cmr logs      # View recent logs
+cmr stop      # Stop
+cmr restart   # Restart
+cmr run       # Run task through model pipeline
+```
+
+Then set in Claude Code settings (`~/.claude/settings.json`):
+
+```json
+"env": {
+  "ANTHROPIC_BASE_URL": "http://127.0.0.1:3457"
+}
+```
+
+Now switch models mid-session with `/model`:
+
+```
+/model opus   → claude-opus-4-7  via api.anthropic.com      (complex)
+/model dsp    → deepseek-v4-pro  via api.deepseek.com  (daily driver)
+/model dsf    → deepseek-v4-flash via api.deepseek.com (cheap & fast)
+/model sonnet → claude-sonnet-4-6 via api.anthropic.com      (balanced)
+/model haiku  → claude-haiku-4-5  via api.anthropic.com      (lightweight)
+```
+
+## v0.3.0 Features
+
+### Stats & Health Monitoring
+
+**`cmr stats`** shows per-backend request counts, failure tracking, and uptime:
+
+```
+Proxy Statistics
+──────────────────────────────────────────────────
+Total requests: 42
+Uptime:         2h 34m 12s
+
+Per-backend stats:
+  Backend           Requests    Last Request
+  deepseek          28          2026-05-25T14:22:10Z
+  claude            14          2026-05-25T14:22:08Z
+```
+
+**`cmr health`** checks every backend's reachability:
+
+```
+Backend Health Check
+──────────────────────────────────────────────────
+✓ deepseek        OK     https://api.deepseek.com
+✓ claude          OK     https://api.anthropic.com
+```
+
+### Auto Fallback
+
+When a backend returns 401/403/5xx or connection errors, cmr automatically retries with the next matching backend. After 3 consecutive failures, a backend is marked as **degraded** and temporarily skipped.
+
+```bash
+cmr stats  # Check failure counts and degraded status
+```
+
+### Real-time Dashboard
+
+**`cmr dashboard`** provides a live terminal dashboard with backend health, request stats, and recent logs — all updating every second. Press `q` to quit. Requires an interactive terminal at least 80 columns wide.
+
+### Web Management UI
+
+Visit `http://127.0.0.1:3457/web` for a browser-based management interface:
+- View stats and backend health
+- Edit configuration with save and reload
+- Run pipeline tasks
+- Watch live logs
+
+> **Security note**: Web UI binds to localhost only. Do not expose port 3457 to public networks.
+
+### Pipeline Enhancements
+
+- **Multi-input modes**: `cmr run` (interactive), `cmr run <task>`, `cmr run --file task.txt`, `echo "task" | cmr run --stdin`
+- **Progress output**: `[1/4] plan (deepseek-v4-pro) completed in 12.3s`
+- **Fault tolerance**: Per-stage timeout, error recovery, Ctrl+C checkpoint & resume
+- **Resume**: `cmr run resume <run-id>` continues from last saved stage
+
+### Hot Reload
+
+Edit `config.json` anytime — cmr detects file changes and reloads automatically. No restart needed, no active sessions interrupted.
+
+### Multi-Backend Routing
+
+Add any number of backends with arbitrary names. Each backend declares a `modelPattern` (regex) to control which models it handles.
+
+### Config Validation
+
+On startup and hot reload, cmr validates every config field. Invalid config on reload keeps the previous working version.
+
+## Custom aliases
+
+Edit the `aliases` section in your config:
+
+```json
+{
+  "aliases": {
+    "fast": "deepseek-v4-flash",
+    "cheap": "deepseek-v4-flash",
+    "thinking": "claude-opus-4-7"
+  }
+}
+```
+
+## Upgrade from v0.1.x
+
+cmr v0.3.0 is fully backward-compatible with v0.1.x and v0.2.x configs. On first load:
+
+1. The old `backends` format (with `url` + `apiKey` only) is auto-migrated to the new format with default `path`, `modelPattern`, and `sanitizer` values
+2. Environment variables `CMR_DEEPSEEK_KEY` and `CMR_CLAUDE_KEY` still work
+3. Logging now displays backend URL hostnames instead of hardcoded service names
+4. The hot reload watcher is automatically active — no configuration needed
+
+## Architecture
+
+```
+src/
+├── server.ts             HTTP server with retry loop & fallback
+├── router.ts             Backend selection (modelPattern + degraded filter)
+├── pipeline.ts           Multi-stage model orchestration
+├── config.ts             Config load + hot reload + env override
+├── watcher.ts            fs.watch on config.json
+├── validator.ts          Config schema validation
+├── sanitize.ts           DeepSeek request sanitizer
+├── stats/                Per-backend metrics (immutable store)
+│   ├── stats-store.ts    State + recordRequest/recordFailure/isDegraded
+│   ├── stats-middleware.ts res.writeHead/end interception
+│   └── stats-types.ts
+├── server/routes/        HTTP endpoints
+│   ├── stats.ts          GET /stats
+│   ├── logs.ts           GET /logs
+│   ├── web.ts            GET /web (serves public/index.html)
+│   ├── api-config.ts     GET/POST /api/config
+│   ├── api-run.ts        POST /api/run, GET /api/run/:id
+│   └── api-logs.ts       GET /api/logs
+├── commands/             CLI commands (used by bin/cmr.js)
+│   ├── stats.ts
+│   └── health.ts
+└── utils/
+    ├── http-client.ts    Backend reachability check
+    └── changelog-generator.ts
+```
+
+Zero runtime dependencies — only Node.js built-ins.
+
+## Tech
+
+- **Runtime**: Node.js ≥ 18 (ESM)
+- **Language**: TypeScript (strict mode)
+- **Dependencies**: 0 runtime dependencies
+- **Test**: Node.js built-in test runner, 88 tests across 27 suites
+- **Dist**: npm package with `cmr` CLI
+
+## License
+
+MIT
