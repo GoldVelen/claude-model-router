@@ -56,6 +56,37 @@ describe('stats-store', () => {
     assert.deepStrictEqual(snapshot.backends, {});
   });
 
+  it('ensureBackends pre-populates empty stats for configured backends', async () => {
+    const { ensureBackends, getSnapshot } = await import('../../src/stats/stats-store.js');
+    ensureBackends(['claude', 'deepseek']);
+    const snapshot = getSnapshot();
+    assert.strictEqual(snapshot.total, 0);
+    assert.strictEqual(snapshot.backends['claude']?.count, 0);
+    assert.strictEqual(snapshot.backends['claude']?.lastRequest, null);
+    assert.strictEqual(snapshot.backends['deepseek']?.count, 0);
+    assert.strictEqual(snapshot.backends['deepseek']?.lastRequest, null);
+    assert.strictEqual(Object.keys(snapshot.backends).length, 2);
+  });
+
+  it('ensureBackends does not overwrite existing runtime stats', async () => {
+    const { ensureBackends, recordRequest, getSnapshot } = await import('../../src/stats/stats-store.js');
+    recordRequest('claude');
+    ensureBackends(['claude', 'deepseek']);
+    const snapshot = getSnapshot();
+    assert.strictEqual(snapshot.backends['claude']?.count, 1);
+    assert.strictEqual(snapshot.backends['deepseek']?.count, 0);
+    assert.strictEqual(Object.keys(snapshot.backends).length, 2);
+  });
+
+  it('ensureBackends is idempotent', async () => {
+    const { ensureBackends, getSnapshot } = await import('../../src/stats/stats-store.js');
+    ensureBackends(['claude']);
+    ensureBackends(['claude']);
+    const snapshot = getSnapshot();
+    assert.strictEqual(Object.keys(snapshot.backends).length, 1);
+    assert.strictEqual(snapshot.backends['claude']?.count, 0);
+  });
+
   it('lastRequest is updated on each call', async () => {
     const { recordRequest, getSnapshot } = await import('../../src/stats/stats-store.js');
     recordRequest('claude');

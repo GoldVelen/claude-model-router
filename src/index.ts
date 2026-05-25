@@ -1,8 +1,10 @@
 import { getConfig, reloadConfig, getConfigPath } from './config.js';
 import { createServer } from './server.js';
 import { startConfigWatcher } from './watcher.js';
+import { ensureBackends } from './stats/stats-store.js';
 
 const config = getConfig();
+ensureBackends(Object.keys(config.backends));
 const server = createServer();
 
 server.listen(config.port, () => {

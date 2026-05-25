@@ -21,6 +21,20 @@ let state: StoreState = {
   startTime: new Date().toISOString(),
 };
 
+export function ensureBackends(backendNames: string[]): void {
+  const entries: Record<string, BackendStats> = { ...state.backends };
+  let changed = false;
+  for (const name of backendNames) {
+    if (!entries[name]) {
+      entries[name] = { ...EMPTY_STATS };
+      changed = true;
+    }
+  }
+  if (changed) {
+    state = { ...state, backends: entries };
+  }
+}
+
 export function recordRequest(backendName: string): void {
   const prev = state.backends[backendName] ?? EMPTY_STATS;
   const now = new Date().toISOString();

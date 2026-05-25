@@ -191,71 +191,171 @@ function cmdConfigShow() {
 
 // ─── Setup (interactive config builder) ─────────────────────────────
 
+const DEFAULT_BACKEND_TEMPLATES = {
+  deepseek: {
+    url: 'https://api.deepseek.com',
+    path: '/anthropic/v1/messages',
+    modelPattern: '^deepseek-',
+    sanitizer: 'deepseek',
+    desc: 'DeepSeek API（兼容 Anthropic 协议）',
+  },
+  claude: {
+    url: 'https://api.anthropic.com',
+    path: '/v1/messages',
+    modelPattern: '^claude-',
+    desc: 'Anthropic API（或兼容服务，如 socheap.ai）',
+  },
+};
+
 async function cmdSetup() {
+  // Load existing config for pre-fill
+  let existing = null;
+  if (existsSync(CONFIG_PATH)) {
+    try { existing = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch { /* ignore */ }
+  }
+
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) =>
     new Promise((resolve) => rl.question(q, resolve));
 
-  console.log('Configure claude-model-router\n');
+  console.log('配置 claude-model-router');
+  if (existing) {
+    console.log('（已检测到现有配置，回车将使用括号内的默认值）');
+  }
+  console.log('');
 
-  const portStr = await ask('Proxy port [3457]: ');
-  const port = parseInt(portStr, 10) || 3457;
+  // Port
+  const defaultPort = existing?.port || 3457;
+  const portStr = await ask(`代理端口 ── 供 Claude Code 连接 [${defaultPort}]: `);
+  const port = parseInt(portStr, 10) || defaultPort;
+
+  // Backends
+  const existingBackends = existing?.backends || {};
+  const backendNames = Object.keys(existingBackends);
+  console.log('\n后端配置 ── 至少需要一个后端：');
+  if (backendNames.length > 0) {
+    console.log(`  已有后端: ${backendNames.join(', ')}`);
+  }
 
   const backends = {};
-  console.log('\nAdd backends (at least one required):');
-
   let first = true;
   while (true) {
-    const addMore = first || (await ask('\nAdd another backend? [y/N]: ')).toLowerCase() === 'y';
+    const addLabel = first
+      ? (backendNames.length > 0 ? '修改已有后端？输入名称即可复用 [y/name]: ' : '添加后端？ [y/name]: ')
+      : '继续添加？输入名称添加，回车完成 [y/name]: ';
+    const addMore = await ask(addLabel);
     if (!addMore) break;
-    first = false;
+    if (addMore.toLowerCase() !== 'y') {
+      // User typed a name — check if it matches an existing backend for pre-fill
+      const existingBe = existingBackends[addMore] || null;
+      const name = addMore;
+      const defaultUrl = existingBe?.url || DEFAULT_BACKEND_TEMPLATES[name]?.url || '';
+      const defaultPath = existingBe?.path || DEFAULT_BACKEND_TEMPLATES[name]?.path || '/v1/messages';
+      const defaultPattern = existingBe?.modelPattern || DEFAULT_BACKEND_TEMPLATES[name]?.modelPattern || '';
+      const defaultDesc = DEFAULT_BACKEND_TEMPLATES[name]?.desc || '';
 
-    const name = await ask('  Backend name (e.g. deepseek, claude): ');
-    const url = await ask('  URL (e.g. https://api.deepseek.com): ');
-    const apiKey = await ask('  API key: ');
-    const path = await ask('  API path [/v1/messages]: ') || '/v1/messages';
-    const modelPattern = await ask('  Model pattern regex (e.g. ^deepseek-): ');
-    const useSanitizer = modelPattern.includes('deepseek')
-      ? (await ask('  Use deepseek sanitizer? [Y/n]: ')).toLowerCase() !== 'n'
-      : false;
+      const urlPrompt = `  ${name} 的 API 地址${defaultDesc ? ` ── ${defaultDesc}` : ''} [${defaultUrl}]: `;
+      const url = await ask(urlPrompt) || defaultUrl;
 
-    const backend = { url, apiKey, path, modelPattern };
-    if (useSanitizer) backend.sanitizer = 'deepseek';
-    backends[name] = backend;
+      const apiKeyPrompt = `  ${name} 的 API 密钥${existingBe?.apiKey ? ' [已配置，回车保留]' : ''}: `;
+      const apiKey = await ask(apiKeyPrompt) || existingBe?.apiKey || '';
+
+      const pathPrompt = `  ${name} 的请求路径 ── 后端接收 Messages API 的路径 [${defaultPath}]: `;
+      const path = await ask(pathPrompt) || defaultPath;
+
+      const patternPrompt = `  ${name} 的模型匹配 ── 正则表达式，匹配到的模型名将路由到此后端 [${defaultPattern}]: `;
+      const modelPattern = await ask(patternPrompt) || defaultPattern;
+
+      const useSanitizer = modelPattern.includes('deepseek')
+        ? (await ask(`  ${name} 是否启用 DeepSeek 净化器？── 移除 thinking 字段并规范化 tool_choice [Y/n]: `)).toLowerCase() !== 'n'
+        : false;
+
+      const backend = { url, apiKey, path, modelPattern };
+      if (useSanitizer) backend.sanitizer = 'deepseek';
+      backends[name] = backend;
+      first = false;
+    } else {
+      first = false;
+      continue;
+    }
   }
 
   if (Object.keys(backends).length === 0) {
-    console.log('At least one backend is required. Aborting.');
+    console.log('至少需要一个后端，已终止。');
     rl.close();
     return;
   }
 
-  console.log('\nModel aliases (optional, press Enter to skip):');
+  // Aliases
+  const existingAliases = existing?.aliases || {};
+  console.log('\n模型别名 ── 方便 Claude Code 中 /model 切换（可选，回车跳过）：');
+  if (Object.keys(existingAliases).length > 0) {
+    console.log(`  已有别名: ${Object.entries(existingAliases).map(([k, v]) => `${k}→${v}`).join(', ')}`);
+  }
   const aliases = {};
   while (true) {
-    const alias = await ask('  Alias (e.g. opus, dsp) [done]: ');
+    const alias = await ask('  别名（如 opus, dsp） [回车完成]: ');
     if (!alias) break;
-    const model = await ask('  Model name (e.g. claude-opus-4-7): ');
+    const defaultModel = existingAliases[alias] || (aliases[alias] || '');
+    const modelPrompt = `  ${alias} 对应的模型名${defaultModel ? ` [${defaultModel}]` : ''}: `;
+    const model = await ask(modelPrompt) || defaultModel;
     if (model) aliases[alias] = model;
   }
+
+  const defaultAliases = {
+    dsp: 'deepseek-v4-pro',
+    dsf: 'deepseek-v4-flash',
+    opus: 'claude-opus-4-7',
+    sonnet: 'claude-sonnet-4-6',
+    haiku: 'claude-haiku-4-5',
+  };
 
   const config = {
     port,
     logLevel: 'info',
     backends,
-    aliases: Object.keys(aliases).length > 0 ? aliases : {
-      dsp: 'deepseek-v4-pro',
-      dsf: 'deepseek-v4-flash',
-      opus: 'claude-opus-4-7',
-      sonnet: 'claude-sonnet-4-6',
-      haiku: 'claude-haiku-4-5',
-    },
+    aliases: Object.keys(aliases).length > 0 ? aliases : (Object.keys(existingAliases).length > 0 ? existingAliases : defaultAliases),
   };
 
   ensureDir(CONFIG_DIR);
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
-  console.log(`\nConfig written to ${CONFIG_PATH}`);
+  console.log(`\n配置已写入 ${CONFIG_PATH}`);
+
+  // Offer to configure Claude Code settings
+  const setupClaude = await ask('\n自动配置 Claude Code 连接到本代理？── 写入 ANTHROPIC_BASE_URL 和占位 API Key [Y/n]: ');
+  if (setupClaude.toLowerCase() !== 'n') {
+    configureClaudeSettings(port);
+  }
+
   rl.close();
+}
+
+function configureClaudeSettings(proxyPort) {
+  const claudeDir = join(homedir(), '.claude');
+  const settingsPath = join(claudeDir, 'settings.json');
+
+  let settings = {};
+  if (existsSync(settingsPath)) {
+    try {
+      const raw = readFileSync(settingsPath, 'utf-8');
+      settings = JSON.parse(raw);
+    } catch {
+      settings = {};
+    }
+  } else {
+    ensureDir(claudeDir);
+  }
+
+  const env = { ...(settings.env || {}) };
+  env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+  env.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY || 'sk-ant-placeholder';
+
+  const newSettings = { ...settings, env };
+  writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2), 'utf-8');
+  console.log(`Claude Code settings updated: ${settingsPath}`);
+  console.log(`  ANTHROPIC_BASE_URL = http://127.0.0.1:${proxyPort}`);
+  console.log(`  ANTHROPIC_API_KEY  = ${env.ANTHROPIC_API_KEY}`);
+  console.log('  (proxy replaces the key when forwarding to backends)');
 }
 
 // ─── Pipeline runner ────────────────────────────────────────────────
@@ -589,7 +689,7 @@ async function cmdDashboard() {
   }
 
   function render(data) {
-    process.stdout.write('\x1b[2J\x1b[H'); // Clear screen
+    process.stdout.write('\x1b[3J\x1b[2J\x1b[H'); // Clear scrollback + screen + home
 
     const pid = getPid() || '?';
     const uptime = data.stats ? formatUptime(data.stats.uptime) : '?';
@@ -645,17 +745,28 @@ async function cmdDashboard() {
   }
 
   while (running) {
-    const data = await fetchData();
-    render(data);
-    await sleep(1000);
+    try {
+      const data = await fetchData();
+      render(data);
+    } catch {
+      // silently retry on transient errors
+      process.stdout.write('\x1b[2J\x1b[H');
+      process.stdout.write('Fetching data failed, retrying...\n');
+    }
+    // Check running flag every 100ms for responsive 'q' exit
+    for (let i = 0; i < 10 && running; i++) {
+      await sleep(100);
+    }
   }
 
   // Restore terminal
   process.stdout.write('\x1b[?25h'); // Show cursor
-  process.stdout.write('\x1b[2J\x1b[H'); // Clear screen
+  process.stdout.write('\x1b[3J\x1b[2J\x1b[H'); // Clear scrollback + screen
   process.stdin.removeListener('data', onKey);
   process.stdin.setRawMode(false);
+  process.stdin.pause();
   console.log('Dashboard closed.');
+  process.exit(0);
 }
 
 // ─── Help ───────────────────────────────────────────────────────────
