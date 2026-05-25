@@ -32,128 +32,297 @@
   .mb { margin-bottom: 8px; }
   .error { color: #f00; font-size: 13px; }
   .success { color: #0f0; font-size: 13px; }
+
+  /* Language switcher */
+  .lang-switcher { position: absolute; top: 20px; right: 20px; display: flex; gap: 8px; }
+  .lang-btn { background: #1a1a1a; border: 1px solid #333; color: #888; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+  .lang-btn:hover { border-color: #555; color: #e0e0e0; }
+  .lang-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+
+  /* Bilingual display rules */
+  body.lang-zh [data-lang="en"] { display: none; }
+  body.lang-zh [data-lang="zh"] { display: revert; }
+  body.lang-en [data-lang="zh"] { display: none; }
+  body.lang-en [data-lang="en"] { display: revert; }
+
+  /* Card header with controls */
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .card-header h2 { margin: 0; }
+  .card-controls { display: flex; gap: 8px; align-items: center; }
+  .card-controls label { font-size: 12px; color: #888; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .card-controls label input[type="checkbox"] { width: auto; margin: 0; }
+  .card-controls button { padding: 4px 12px; font-size: 12px; }
+  #log-last-update { font-size: 11px; color: #666; min-width: 70px; }
 </style>
 </head>
 <body>
 
-<h1>Claude Model Router</h1>
-<p class="subtitle" id="status-line">Connecting...</p>
+<div class="lang-switcher">
+  <button class="lang-btn active" data-lang-btn="en" onclick="switchLang('en')" aria-label="Switch to English">English</button>
+  <button class="lang-btn" data-lang-btn="zh" onclick="switchLang('zh')" aria-label="切换到中文">中文</button>
+</div>
+
+<h1>
+  <span data-lang="en">Claude Model Router</span>
+  <span data-lang="zh">Claude 模型路由器</span>
+</h1>
+<p class="subtitle" id="status-line">
+  <span data-lang="en">Connecting...</span>
+  <span data-lang="zh">连接中...</span>
+</p>
 
 <div class="grid">
   <div class="card">
-    <h2>Status</h2>
-    <p class="stat">Total Requests: <span id="total-reqs">-</span></p>
-    <p class="stat">Uptime: <span id="uptime">-</span></p>
-    <p class="stat">Started: <span id="start-time">-</span></p>
-    <p class="stat">HTTP Port: <span id="port">3457</span></p>
+    <h2>
+      <span data-lang="en">Status</span>
+      <span data-lang="zh">状态</span>
+    </h2>
+    <p class="stat">
+      <span data-lang="en">Total Requests:</span>
+      <span data-lang="zh">总请求数：</span>
+      <span id="total-reqs">-</span>
+    </p>
+    <p class="stat">
+      <span data-lang="en">Uptime:</span>
+      <span data-lang="zh">运行时长：</span>
+      <span id="uptime">-</span>
+    </p>
+    <p class="stat">
+      <span data-lang="en">Started:</span>
+      <span data-lang="zh">启动时间：</span>
+      <span id="start-time">-</span>
+    </p>
+    <p class="stat">
+      <span data-lang="en">HTTP Port:</span>
+      <span data-lang="zh">HTTP 端口：</span>
+      <span id="port">3457</span>
+    </p>
   </div>
 
   <div class="card">
-    <h2>Backend Health</h2>
+    <h2>
+      <span data-lang="en">Backend Health</span>
+      <span data-lang="zh">后端健康状态</span>
+    </h2>
     <table>
-      <thead><tr><th>Backend</th><th>Status</th><th>Requests</th><th>Last</th></tr></thead>
-      <tbody id="backend-tbody"><tr><td colspan="4">No data</td></tr></tbody>
+      <thead><tr>
+        <th><span data-lang="en">Backend</span><span data-lang="zh">后端</span></th>
+        <th><span data-lang="en">Status</span><span data-lang="zh">状态</span></th>
+        <th><span data-lang="en">Requests</span><span data-lang="zh">请求数</span></th>
+        <th><span data-lang="en">Last</span><span data-lang="zh">最后请求</span></th>
+      </tr></thead>
+      <tbody id="backend-tbody"><tr><td colspan="4">
+        <span data-lang="en">No data</span>
+        <span data-lang="zh">无数据</span>
+      </td></tr></tbody>
     </table>
   </div>
 
   <div class="card full">
-    <h2>Configuration</h2>
+    <h2>
+      <span data-lang="en">Configuration</span>
+      <span data-lang="zh">配置</span>
+    </h2>
     <textarea id="config-editor" class="mb"></textarea>
     <div style="display:flex; gap:8px; align-items:center;">
-      <button onclick="loadConfig()">Refresh</button>
-      <button onclick="saveConfig()">Save</button>
+      <button onclick="loadConfig()">
+        <span data-lang="en">Refresh</span>
+        <span data-lang="zh">刷新</span>
+      </button>
+      <button onclick="saveConfig()">
+        <span data-lang="en">Save</span>
+        <span data-lang="zh">保存</span>
+      </button>
       <span id="config-msg"></span>
     </div>
   </div>
 
   <div class="card full">
-    <h2>Pipeline Runner</h2>
+    <h2>
+      <span data-lang="en">Pipeline Runner</span>
+      <span data-lang="zh">流水线运行器</span>
+    </h2>
     <textarea id="pipeline-task" class="mb" placeholder="Enter task description..."></textarea>
     <div style="display:flex; gap:8px; align-items:center;">
-      <button onclick="runPipeline()">Run Pipeline</button>
+      <button onclick="runPipeline()">
+        <span data-lang="en">Run Pipeline</span>
+        <span data-lang="zh">运行流水线</span>
+      </button>
       <span id="pipeline-msg"></span>
     </div>
   </div>
 
   <div class="card full">
-    <h2>Recent Logs</h2>
-    <div id="log-container">Loading...</div>
+    <div class="card-header">
+      <h2>
+        <span data-lang="en">Recent Logs</span>
+        <span data-lang="zh">最近日志</span>
+      </h2>
+      <div class="card-controls">
+        <label>
+          <input type="checkbox" id="auto-refresh-logs" checked onchange="toggleAutoRefresh()">
+          <span data-lang="en">Auto-refresh</span>
+          <span data-lang="zh">自动刷新</span>
+        </label>
+        <button onclick="refreshLogs()">
+          <span data-lang="en">Refresh</span>
+          <span data-lang="zh">刷新</span>
+        </button>
+        <span id="log-last-update"></span>
+      </div>
+    </div>
+    <div id="log-container">
+      <span data-lang="en">Loading...</span>
+      <span data-lang="zh">加载中...</span>
+    </div>
   </div>
 </div>
 
 <script>
+// ── Language ──────────────────────────────────────────────────────────
+function switchLang(lang) {
+  document.body.className = 'lang-' + lang;
+  localStorage.setItem('cmr-lang', lang);
+  document.querySelectorAll('.lang-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.langBtn === lang);
+  });
+}
+
+(function initLang() {
+  var saved = localStorage.getItem('cmr-lang');
+  var browserLang = navigator.language.toLowerCase();
+  var defaultLang = saved || (browserLang.startsWith('zh') ? 'zh' : 'en');
+  switchLang(defaultLang);
+})();
+
+// ── Stats ─────────────────────────────────────────────────────────────
+function formatMs(ms) {
+  if (!ms) return '0s';
+  var s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60);
+  if (h>0) return h + 'h ' + (m%60) + 'm ' + (s%60) + 's';
+  if (m>0) return m + 'm ' + (s%60) + 's';
+  return s + 's';
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
 async function refreshStats() {
   try {
-    const r = await fetch('/stats'); const d = await r.json();
+    var r = await fetch('/stats'); var d = await r.json();
     document.getElementById('total-reqs').textContent = d.total;
     document.getElementById('uptime').textContent = formatMs(d.uptime);
     document.getElementById('start-time').textContent = d.startTime || '-';
-    const tbody = document.getElementById('backend-tbody');
-    const backends = Object.entries(d.backends || {});
-    if (backends.length === 0) tbody.innerHTML = '<tr><td colspan="4">No backends configured</td></tr>';
-    else tbody.innerHTML = backends.map(([n,s]) => {
-      const cf = s.consecutiveFailures || 0;
-      const status = cf === 0 ? 'ok' : cf < 3 ? 'degraded' : 'down';
-      return `<tr><td>${esc(n)}</td><td class="status-${status}">${status.toUpperCase()}</td><td>${s.count||0}</td><td>${(s.lastRequest||'').slice(0,19)||'never'}</td></tr>`;
-    }).join('');
-    document.getElementById('status-line').textContent = 'Connected';
+    var tbody = document.getElementById('backend-tbody');
+    var backends = Object.entries(d.backends || {});
+    if (backends.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4"><span data-lang="en">No backends configured</span><span data-lang="zh">未配置后端</span></td></tr>';
+    } else {
+      tbody.innerHTML = backends.map(function(entry) {
+        var n = entry[0], s = entry[1];
+        var cf = s.consecutiveFailures || 0;
+        var status = cf === 0 ? 'ok' : cf < 3 ? 'degraded' : 'down';
+        return '<tr><td>' + esc(n) + '</td><td class="status-' + status + '">' + status.toUpperCase() + '</td><td>' + (s.count||0) + '</td><td>' + ((s.lastRequest||'').slice(0,19)||'never') + '</td></tr>';
+      }).join('');
+    }
+    document.getElementById('status-line').innerHTML =
+      '<span data-lang="en">Connected</span><span data-lang="zh">已连接</span>';
   } catch(e) {}
 }
+
+// ── Logs ──────────────────────────────────────────────────────────────
+var autoRefreshEnabled = true;
+var logRefreshInterval = null;
 
 async function refreshLogs() {
   try {
-    const r = await fetch('/api/logs'); const d = await r.json();
-    const container = document.getElementById('log-container');
-    container.innerHTML = (d.logs||[]).slice(-30).map(l=>`<div>${esc(l)}</div>`).join('')||'(no logs)';
-    container.scrollTop = container.scrollHeight;
+    var r = await fetch('/api/logs'); var d = await r.json();
+    var container = document.getElementById('log-container');
+    var logs = (d.logs || []).slice(-30);
+    if (logs.length === 0) {
+      container.innerHTML = '<div style="color:#666;"><span data-lang="en">(no logs)</span><span data-lang="zh">（无日志）</span></div>';
+    } else {
+      container.innerHTML = logs.map(function(l) { return '<div>' + esc(l) + '</div>'; }).join('');
+      container.scrollTop = container.scrollHeight;
+    }
+    var now = new Date().toLocaleTimeString();
+    document.getElementById('log-last-update').textContent = now;
   } catch(e) {}
 }
 
+function toggleAutoRefresh() {
+  autoRefreshEnabled = document.getElementById('auto-refresh-logs').checked;
+  localStorage.setItem('cmr-auto-refresh-logs', autoRefreshEnabled);
+  if (autoRefreshEnabled) { startLogRefresh(); } else { stopLogRefresh(); }
+}
+
+function startLogRefresh() {
+  if (logRefreshInterval) return;
+  logRefreshInterval = setInterval(refreshLogs, 2000);
+}
+
+function stopLogRefresh() {
+  if (logRefreshInterval) { clearInterval(logRefreshInterval); logRefreshInterval = null; }
+}
+
+// ── Config ────────────────────────────────────────────────────────────
 async function loadConfig() {
   try {
-    const r = await fetch('/api/config'); const d = await r.json();
+    var r = await fetch('/api/config'); var d = await r.json();
     document.getElementById('config-editor').value = JSON.stringify(d,null,2);
     document.getElementById('config-msg').textContent = '';
   } catch(e) { document.getElementById('config-msg').textContent = 'Failed to load config'; }
 }
 
 async function saveConfig() {
-  const msg = document.getElementById('config-msg');
+  var msg = document.getElementById('config-msg');
   try {
-    const data = JSON.parse(document.getElementById('config-editor').value);
-    const r = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-    const result = await r.json();
-    if (result.ok) { msg.className='success'; msg.textContent='Saved!'; }
-    else { msg.className='error'; msg.textContent=(result.errors||['Unknown']).join(', '); }
+    var data = JSON.parse(document.getElementById('config-editor').value);
+    var r = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    var result = await r.json();
+    if (result.ok) {
+      msg.className='success';
+      msg.innerHTML = '<span data-lang="en">Saved!</span><span data-lang="zh">已保存！</span>';
+    } else {
+      msg.className='error';
+      msg.textContent = (result.errors||['Unknown']).join(', ');
+    }
   } catch(e) { msg.className='error'; msg.textContent=e.message; }
 }
 
+// ── Pipeline ──────────────────────────────────────────────────────────
 async function runPipeline() {
-  const msg = document.getElementById('pipeline-msg');
-  const task = document.getElementById('pipeline-task').value.trim();
-  if (!task) { msg.className='error'; msg.textContent='Enter a task description'; return; }
-  msg.className=''; msg.textContent='Running...';
+  var msg = document.getElementById('pipeline-msg');
+  var task = document.getElementById('pipeline-task').value.trim();
+  if (!task) {
+    msg.className='error';
+    msg.innerHTML = '<span data-lang="en">Enter a task description</span><span data-lang="zh">输入任务描述</span>';
+    return;
+  }
+  msg.className=''; msg.textContent = 'Running...';
   try {
-    const r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task})});
-    const d = await r.json();
+    var r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task:task})});
+    var d = await r.json();
     msg.className = d.jobId?'success':'error';
-    msg.textContent = d.jobId?`Submitted: ${d.jobId}`:(d.error||'Failed');
+    msg.textContent = d.jobId?('Submitted: ' + d.jobId):(d.error||'Failed');
   } catch(e) { msg.className='error'; msg.textContent=e.message; }
 }
 
-function formatMs(ms) {
-  if (!ms) return '0s';
-  const s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60);
-  if (h>0) return `${h}h ${m%60}m ${s%60}s`;
-  if (m>0) return `${m}m ${s%60}s`;
-  return `${s}s`;
-}
+// ── Init ──────────────────────────────────────────────────────────────
+(function init() {
+  var savedAutoRefresh = localStorage.getItem('cmr-auto-refresh-logs');
+  if (savedAutoRefresh !== null) {
+    autoRefreshEnabled = savedAutoRefresh === 'true';
+    document.getElementById('auto-refresh-logs').checked = autoRefreshEnabled;
+  }
 
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  setInterval(refreshStats, 2000);
 
-loadConfig();
-setInterval(()=>{refreshStats();refreshLogs();}, 2000);
-refreshStats(); refreshLogs();
+  if (autoRefreshEnabled) { startLogRefresh(); }
+
+  loadConfig();
+  refreshStats();
+  refreshLogs();
+})();
 </script>
 </body>
 </html>
