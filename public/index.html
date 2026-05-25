@@ -182,6 +182,31 @@
   <div class="card full">
     <div class="card-header">
       <h2>
+        <span data-lang="en">Pipeline Tasks</span>
+        <span data-lang="zh">流水线任务</span>
+      </h2>
+      <div class="card-controls">
+        <label>
+          <input type="checkbox" id="auto-refresh-jobs" checked onchange="toggleJobsRefresh()">
+          <span data-lang="en">Auto-refresh</span>
+          <span data-lang="zh">自动刷新</span>
+        </label>
+        <button onclick="refreshJobs()">
+          <span data-lang="en">Refresh</span>
+          <span data-lang="zh">刷新</span>
+        </button>
+      </div>
+    </div>
+    <div id="jobs-container">
+      <span data-lang="en">No tasks yet</span>
+      <span data-lang="zh">暂无任务</span>
+    </div>
+    <div id="job-detail" style="display:none; margin-top:16px; border-top:1px solid #333; padding-top:16px;"></div>
+  </div>
+
+  <div class="card full">
+    <div class="card-header">
+      <h2>
         <span data-lang="en">Recent Logs</span>
         <span data-lang="zh">最近日志</span>
       </h2>
@@ -316,6 +341,25 @@ async function saveConfig() {
   } catch(e) { msg.className='error'; msg.textContent=e.message; }
 }
 
+// ── Input persistence ────────────────────────────────────────────────
+function saveInputs() {
+  localStorage.setItem('cmr-task', document.getElementById('pipeline-task').value);
+  localStorage.setItem('cmr-working-dir', document.getElementById('working-dir').value);
+  localStorage.setItem('cmr-auto-commit', document.getElementById('auto-commit').checked);
+  localStorage.setItem('cmr-auto-execute', document.getElementById('auto-execute').checked);
+}
+
+function restoreInputs() {
+  var task = localStorage.getItem('cmr-task');
+  var wd = localStorage.getItem('cmr-working-dir');
+  if (task) document.getElementById('pipeline-task').value = task;
+  if (wd) document.getElementById('working-dir').value = wd;
+  var ac = localStorage.getItem('cmr-auto-commit');
+  if (ac !== null) document.getElementById('auto-commit').checked = ac === 'true';
+  var ae = localStorage.getItem('cmr-auto-execute');
+  if (ae !== null) document.getElementById('auto-execute').checked = ae === 'true';
+}
+
 // ── Pipeline ──────────────────────────────────────────────────────────
 async function runPipeline() {
   var msg = document.getElementById('pipeline-msg');
@@ -336,11 +380,14 @@ async function runPipeline() {
     return;
   }
 
+  saveInputs();
+
   msg.className='';
   msg.innerHTML = '<span data-lang="en">Running...</span><span data-lang="zh">运行中...</span>';
 
   try {
-    var payload = { task: task };
+    var currentLang = localStorage.getItem('cmr-lang') || 'en';
+    var payload = { task: task, language: currentLang };
     if (autoExecute && workingDir) {
       payload.workingDir = workingDir;
       payload.autoCommit = autoCommit;
@@ -356,13 +403,99 @@ async function runPipeline() {
     msg.className = d.jobId ? 'success' : 'error';
 
     if (d.jobId) {
-      msg.innerHTML = '<span data-lang="en">Submitted: ' + d.jobId + '</span><span data-lang="zh">已提交: ' + d.jobId + '</span>';
+      msg.innerHTML = '<span data-lang="en">Submitted: ' + d.jobId + ' — see Pipeline Tasks below</span><span data-lang="zh">已提交: ' + d.jobId + ' — 详见下方流水线任务</span>';
+      selectedJobId = d.jobId;
+      refreshJobs();
     } else {
       msg.textContent = d.error || 'Failed';
     }
   } catch(e) {
     msg.className='error';
     msg.textContent = e.message;
+  }
+}
+
+// ── Jobs dashboard ───────────────────────────────────────────────────
+var jobsRefreshInterval = null;
+var jobsAutoRefreshEnabled = true;
+var selectedJobId = null;
+
+function stageBadge(stage) {
+  var colors = {
+    pending: '#666', running: '#3b82f6', done: '#10b981',
+    failed: '#ef4444', timeout: '#f59e0b'
+  };
+  var color = colors[stage.status] || '#666';
+  var dur = stage.durationMs ? ' ' + (stage.durationMs/1000).toFixed(1) + 's' : '';
+  return '<span style="display:inline-block;padding:2px 6px;margin:1px;border-radius:3px;background:' + color + ';color:#fff;font-size:11px;">' + esc(stage.name) + dur + '</span>';
+}
+
+function jobStatusLabel(job) {
+  if (job.status === 'running' && job.currentStage) {
+    return '<span style="color:#3b82f6;">&#9654; ' + esc(job.currentStage) + '</span>';
+  }
+  var labels = {
+    pending: '<span style="color:#666;">&ctdot; pending</span>',
+    running: '<span style="color:#3b82f6;">&#9654; running</span>',
+    done: '<span style="color:#10b981;">&#10003; done</span>',
+    failed: '<span style="color:#ef4444;">&#10007; failed</span>',
+    aborted: '<span style="color:#f59e0b;">&#8854; aborted</span>'
+  };
+  return labels[job.status] || job.status;
+}
+
+async function refreshJobs() {
+  try {
+    var r = await fetch('/api/runs');
+    var d = await r.json();
+    var container = document.getElementById('jobs-container');
+    if (!d.jobs || d.jobs.length === 0) {
+      container.innerHTML = '<span data-lang="en" style="color:#666;">No tasks yet</span><span data-lang="zh" style="color:#666;">暂无任务</span>';
+      return;
+    }
+    container.innerHTML = d.jobs.map(function(j) {
+      var stages = j.stages.map(stageBadge).join(' ');
+      var elapsed = j.durationMs ? (j.durationMs/1000).toFixed(1) + 's' : ((Date.now() - j.startedAt)/1000).toFixed(1) + 's';
+      var selected = selectedJobId === j.jobId ? 'background:#1f2937;' : '';
+      return '<div onclick="selectJob(\'' + j.jobId + '\')" style="cursor:pointer;padding:8px;margin:4px 0;border:1px solid #333;border-radius:4px;' + selected + '">' +
+        '<div style="display:flex;justify-content:space-between;font-size:12px;">' +
+          '<span style="font-family:monospace;">' + esc(j.jobId) + '</span>' +
+          '<span>' + jobStatusLabel(j) + ' &middot; ' + elapsed + '</span>' +
+        '</div>' +
+        '<div style="font-size:12px;color:#aaa;margin:4px 0;">' + esc(j.task) + '</div>' +
+        '<div>' + stages + '</div>' +
+      '</div>';
+    }).join('');
+    if (selectedJobId) loadJobDetail(selectedJobId);
+  } catch(e) { /* silent */ }
+}
+
+async function selectJob(jobId) {
+  selectedJobId = jobId;
+  await loadJobDetail(jobId);
+  refreshJobs();
+}
+
+async function loadJobDetail(jobId) {
+  try {
+    var r = await fetch('/api/run/' + encodeURIComponent(jobId));
+    if (!r.ok) return;
+    var job = await r.json();
+    var detail = document.getElementById('job-detail');
+    detail.style.display = 'block';
+    var reportHtml = job.report ? '<h3>Report</h3><pre style="white-space:pre-wrap;background:#0d1117;padding:12px;border-radius:4px;">' + esc(job.report) + '</pre>' : '<p style="color:#888;">No report yet</p>';
+    var manifestHtml = job.ctx && job.ctx.manifestReport ? '<h3>Manifest</h3><pre style="white-space:pre-wrap;background:#0d1117;padding:12px;border-radius:4px;">' + esc(job.ctx.manifestReport) + '</pre>' : '';
+    var executeHtml = job.executeResult ? '<h3>Execute Result</h3><pre style="white-space:pre-wrap;background:#0d1117;padding:12px;border-radius:4px;font-size:11px;">' + esc(job.executeResult) + '</pre>' : '';
+    detail.innerHTML = '<h2 style="margin-top:0;">Job ' + esc(jobId) + '</h2>' + reportHtml + manifestHtml + executeHtml;
+  } catch(e) { /* silent */ }
+}
+
+function toggleJobsRefresh() {
+  jobsAutoRefreshEnabled = document.getElementById('auto-refresh-jobs').checked;
+  if (jobsAutoRefreshEnabled) {
+    if (!jobsRefreshInterval) jobsRefreshInterval = setInterval(refreshJobs, 2000);
+  } else {
+    if (jobsRefreshInterval) { clearInterval(jobsRefreshInterval); jobsRefreshInterval = null; }
   }
 }
 
@@ -378,9 +511,12 @@ async function runPipeline() {
 
   if (autoRefreshEnabled) { startLogRefresh(); }
 
+  restoreInputs();
   loadConfig();
   refreshStats();
   refreshLogs();
+  refreshJobs();
+  if (jobsAutoRefreshEnabled) jobsRefreshInterval = setInterval(refreshJobs, 2000);
 })();
 </script>
 </body>

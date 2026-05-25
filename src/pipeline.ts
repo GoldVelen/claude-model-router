@@ -29,7 +29,23 @@ CRITICAL RULES your plan must enforce:
 - 80%+ test coverage
 - No comments unless the WHY is non-obvious
 
-Task: {task}`,
+Task: {task}
+
+## File Manifest（强制要求 — 机器解析）
+
+最后必须输出一个由 <!-- MANIFEST_START --> 和 <!-- MANIFEST_END --> 包围的 JSON 清单。格式：
+
+<!-- MANIFEST_START -->
+\`\`\`json
+{
+  "files": [
+    { "path": "src/foo.ts", "operation": "CREATE", "purpose": "新增 X 模块" },
+    { "path": "src/bar.ts", "operation": "MODIFY", "purpose": "增加 Y 函数；修改 Z handler" },
+    { "path": "src/old.ts", "operation": "DELETE", "purpose": "已被 foo.ts 取代" }
+  ]
+}
+\`\`\`
+operation 字段只能是 CREATE / MODIFY / DELETE 之一。path 必须是相对项目根的路径。这是后续验证步骤的输入，不要省略或改格式。`,
   },
   implement: {
     model: 'dsp',
@@ -43,10 +59,11 @@ RULES (absolute):
 - Use the exact names, types, and patterns from the plan
 - If a constraint is listed (zero deps, immutable, etc.), enforce it
 
-Your output must be the actual code changes:
-- For each file, output the complete file (or the exact changes)
-- Use Edit-style diffs: show old_string → new_string
-- If creating a new file, output the full content
+	Your output must be the actual code changes:
+	- For every file, output the COMPLETE file content (not diffs, not patches)
+	- Use code block with language:filepath format, e.g. typescript:src/file.ts
+	- Never output diff/patch format (no ---/+++ headers, no @@ hunks)
+	- NEVER write partial diffs
 
 Task: {task}
 
@@ -101,6 +118,8 @@ Implementation to parse:
     model: 'dsf',
     prompt: `You are the reporter. Create a concise summary in markdown. Focus on WHAT changed and whether the implementation matches the plan.
 
+{languageInstruction}
+
 Structure:
 ## Summary
 - 2-3 sentences on what was accomplished
@@ -113,6 +132,9 @@ Structure:
 
 ## Test Results
 - Test count, suites, coverage estimate, any failures
+
+## Manifest Compliance
+- Reference Manifest Verification content, clearly indicate which planned files were not actually modified
 
 ## Issues & Follow-ups
 - Any [DEVIATION] flags from the implementer
@@ -128,7 +150,10 @@ Implementation:
 {implement}
 
 Test Results:
-{test}`,
+{test}
+
+Manifest Verification:
+{manifestReport}`,
   },
 };
 
@@ -231,6 +256,13 @@ export function callModel(
   });
 }
 
+export interface PipelineProgressCallbacks {
+  onStageStart?: (name: string, index: number, total: number) => void;
+  onStageEnd?: (name: string, result: { status: 'done' | 'failed' | 'timeout'; durationMs: number; error?: string }) => void;
+  onExecutePhaseStart?: () => void;
+  onExecutePhaseEnd?: (ctx: PipelineContext) => void;
+}
+
 export interface PipelineResult {
   ctx: PipelineContext;
   stages: string[];
@@ -253,6 +285,8 @@ export async function runPipeline(
     signal?: AbortSignal;
     workingDir?: string;
     autoCommit?: boolean;
+    callbacks?: PipelineProgressCallbacks;
+    language?: 'en' | 'zh';
   },
 ): Promise<PipelineResult> {
   const stages = getPipelineStages(config);
@@ -270,11 +304,23 @@ export async function runPipeline(
     const name = stageNames[i]!;
     const stage = stages[name]!;
     const model = resolveStageModel(stage.model, config);
-    const prompt = interpolatePrompt(stage.prompt, ctx);
+
+    let promptTemplate = stage.prompt;
+    if (name === 'report' && options?.language) {
+      const languageInstruction = options.language === 'zh'
+        ? 'IMPORTANT: Output the entire report in Chinese (中文). All section headers, descriptions, and content must be in Chinese.'
+        : 'IMPORTANT: Output the entire report in English. All section headers, descriptions, and content must be in English.';
+      promptTemplate = promptTemplate.replace('{languageInstruction}', languageInstruction);
+    } else {
+      promptTemplate = promptTemplate.replace('{languageInstruction}', '');
+    }
+
+    const prompt = interpolatePrompt(promptTemplate, ctx);
     const num = i + 1;
     const stageTimeout = defaultTimeout;
 
     process.stderr.write(`[${num}/${total}] ${name} (${model}) running...\n`);
+    options?.callbacks?.onStageStart?.(name, num, total);
 
     const startTime = Date.now();
 
@@ -289,6 +335,7 @@ export async function runPipeline(
       const duration = Date.now() - startTime;
       process.stderr.write(`[${num}/${total}] ${name} completed in ${formatDuration(duration)}\n`);
       ctx[name] = result;
+      options?.callbacks?.onStageEnd?.(name, { status: 'done', durationMs: duration });
     } catch (err) {
       const duration = Date.now() - startTime;
       const message = err instanceof Error ? err.message : String(err);
@@ -297,19 +344,24 @@ export async function runPipeline(
         process.stderr.write(`[${num}/${total}] ${name} timeout after ${formatDuration(duration)}\n`);
         timedOutStages.push(name);
         ctx[name] = '[TIMEOUT]';
+        options?.callbacks?.onStageEnd?.(name, { status: 'timeout', durationMs: duration, error: message });
       } else {
         process.stderr.write(`[${num}/${total}] ${name} failed: ${message}\n`);
         failedStages.push(name);
         ctx[name] = `[ERROR: ${message}]`;
+        options?.callbacks?.onStageEnd?.(name, { status: 'failed', durationMs: duration, error: message });
       }
     }
   }
 
-  if (options?.workingDir && ctx.implement && !ctx.implement.startsWith('[')) {
+  const implementSource = (ctx.execute && !ctx.execute.startsWith('[')) ? ctx.execute : ctx.implement;
+
+  if (options?.workingDir && implementSource && !implementSource.startsWith('[')) {
+    options?.callbacks?.onExecutePhaseStart?.();
     try {
       const { executeCodeChanges, runTests, gitCommit } = await import('./executor.js');
 
-      const executeResult = await executeCodeChanges(ctx.implement, {
+      const executeResult = await executeCodeChanges(implementSource, {
         workingDir: options.workingDir,
         dryRun: false,
       });
@@ -317,7 +369,7 @@ export async function runPipeline(
       ctx.executeResult = JSON.stringify(executeResult, null, 2);
 
       if (executeResult.filesWritten.length > 0) {
-        process.stderr.write(`[execute] Wrote ${executeResult.filesWritten.length} files\n`);
+        process.stderr.write(`[execute] Wrote ${executeResult.filesWritten.length} files (source: ${ctx.execute ? 'execute' : 'implement'})\n`);
 
         const testResult = await runTests(options.workingDir);
         ctx.testExecution = testResult.output;
@@ -348,7 +400,38 @@ export async function runPipeline(
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[execute] Failed: ${message}\n`);
       ctx.executeError = message;
+    } finally {
+      options?.callbacks?.onExecutePhaseEnd?.(ctx);
     }
+  }
+
+  if (options?.workingDir && ctx.plan && !ctx.plan.startsWith('[')) {
+    try {
+      const { parseManifest, verifyManifest, formatVerificationReport } = await import('./manifest.js');
+      const manifest = parseManifest(ctx.plan);
+      if (manifest) {
+        const executeResult = ctx.executeResult ? (JSON.parse(ctx.executeResult) as { filesWritten?: string[] }) : null;
+        const written = executeResult?.filesWritten ?? [];
+        const verification = await verifyManifest(manifest, options.workingDir, written);
+        ctx.manifestVerification = JSON.stringify(verification);
+        ctx.manifestReport = formatVerificationReport(verification);
+        process.stderr.write(`[verify] ${verification.matched.length} matched, ${verification.missing.length} missing, ${verification.unplanned.length} unplanned\n`);
+      } else {
+        ctx.manifestReport = '[Manifest] Plan did not include a parseable manifest block';
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.manifestReport = `[Manifest] Verification failed: ${message}`;
+    }
+  }
+
+  if (ctx.report && !ctx.report.startsWith('[')) {
+    process.stderr.write('\n========== PIPELINE REPORT ==========\n');
+    process.stderr.write(ctx.report + '\n');
+    if (ctx.manifestReport) {
+      process.stderr.write('\n' + ctx.manifestReport + '\n');
+    }
+    process.stderr.write('=====================================\n\n');
   }
 
   return { ctx, stages: stageNames, failedStages, timedOutStages, abortedAt: null };

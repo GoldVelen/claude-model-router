@@ -1,22 +1,14 @@
 import { type IncomingMessage, type ServerResponse } from 'node:http';
 import { getConfig } from '../../config.js';
 import { getPipelineStages, runPipeline, type PipelineContext } from '../../pipeline.js';
-
-interface PipelineResult {
-  ctx: PipelineContext;
-  stages: string[];
-  failedStages: string[];
-  timedOutStages: string[];
-}
-
-const jobs = new Map<string, { status: string; ctx?: PipelineContext }>();
+import { createJob, getJob, updateJob, updateStage } from '../job-store.js';
 
 export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): boolean {
   const url = req.url ?? '';
 
-  if (req.method === 'GET' && url.startsWith('/api/run/')) {
+  if (req.method === 'GET' && url.startsWith('/api/run/') && url !== '/api/run/') {
     const jobId = url.slice('/api/run/'.length);
-    const job = jobs.get(jobId);
+    const job = getJob(jobId);
     if (!job) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Job not found' }));
@@ -30,12 +22,13 @@ export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): bo
   if (req.method === 'POST' && url === '/api/run') {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
-    req.on('end', async () => {
+    req.on('end', () => {
       try {
-        const { task, workingDir, autoCommit } = JSON.parse(body) as {
+        const { task, workingDir, autoCommit, language } = JSON.parse(body) as {
           task?: string;
           workingDir?: string;
           autoCommit?: boolean;
+          language?: 'en' | 'zh';
         };
         if (!task) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -45,17 +38,13 @@ export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): bo
 
         const config = getConfig();
         const port = config.port || 3457;
-        const jobId = `run-${Date.now()}`;
-        jobs.set(jobId, { status: 'running' });
+        const stageNames = Object.keys(getPipelineStages(config));
+        const job = createJob({ task, workingDir, autoCommit: autoCommit ?? false, stageNames });
 
-        const result: PipelineResult = await runPipeline(task, config, port, {
-          workingDir,
-          autoCommit: autoCommit ?? false,
-        });
-        jobs.set(jobId, { status: 'done', ctx: result.ctx });
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jobId: job.jobId }));
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ jobId }));
+        runPipelineInBackground(job.jobId, task, config, port, workingDir, autoCommit ?? false, language ?? 'en');
       } catch {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
@@ -65,4 +54,63 @@ export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): bo
   }
 
   return false;
+}
+
+function runPipelineInBackground(
+  jobId: string,
+  task: string,
+  config: ReturnType<typeof getConfig>,
+  port: number,
+  workingDir: string | undefined,
+  autoCommit: boolean,
+  language: 'en' | 'zh',
+): void {
+  updateJob(jobId, { status: 'running' });
+
+  runPipeline(task, config, port, {
+    workingDir,
+    autoCommit,
+    language,
+    callbacks: {
+      onStageStart: (name) => {
+        updateJob(jobId, { currentStage: name });
+        updateStage(jobId, name, { status: 'running', startedAt: Date.now() });
+      },
+      onStageEnd: (name, result) => {
+        updateStage(jobId, name, {
+          status: result.status,
+          finishedAt: Date.now(),
+          durationMs: result.durationMs,
+          error: result.error,
+        });
+      },
+      onExecutePhaseEnd: (ctx) => {
+        updateJob(jobId, {
+          executeResult: ctx.executeResult,
+          report: ctx.report,
+        });
+      },
+    },
+  })
+    .then((result) => {
+      const failed = result.failedStages.length > 0 || result.timedOutStages.length > 0;
+      updateJob(jobId, {
+        status: failed ? 'failed' : 'done',
+        currentStage: null,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - (getJob(jobId)?.startedAt ?? Date.now()),
+        ctx: result.ctx,
+        report: result.ctx.report,
+        executeResult: result.ctx.executeResult,
+      });
+    })
+    .catch((err: unknown) => {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      updateJob(jobId, {
+        status: 'failed',
+        currentStage: null,
+        finishedAt: Date.now(),
+        errorMessage,
+      });
+    });
 }

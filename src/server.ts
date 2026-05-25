@@ -8,6 +8,7 @@ import { handleStatsRoute } from './server/routes/stats.js';
 import { handleLogsRoute } from './server/routes/logs.js';
 import { handleWebRoute } from './server/routes/web.js';
 import { handleApiConfigRoute } from './server/routes/api-config.js';
+import { handleApiRunsRoute } from './server/routes/api-runs.js';
 import { handleApiRunRoute } from './server/routes/api-run.js';
 import { handleApiLogsRoute } from './server/routes/api-logs.js';
 import { handleLoginRoute } from './server/routes/login.js';
@@ -90,6 +91,7 @@ export function createServer(): http.Server {
     if (!checkAuth(req, res)) return;
     if (handleWebRoute(req, res)) return;
     if (handleApiConfigRoute(req, res)) return;
+    if (handleApiRunsRoute(req, res)) return;
     if (handleApiRunRoute(req, res)) return;
     if (handleApiLogsRoute(req, res)) return;
 
