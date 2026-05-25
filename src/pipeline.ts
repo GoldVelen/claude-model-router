@@ -305,7 +305,7 @@ export async function runPipeline(
     }
   }
 
-  if (options?.workingDir && ctx.implement) {
+  if (options?.workingDir && ctx.implement && !ctx.implement.startsWith('[')) {
     try {
       const { executeCodeChanges, runTests, gitCommit } = await import('./executor.js');
 
