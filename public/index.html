@@ -142,6 +142,29 @@
       <span data-lang="en">Pipeline Runner</span>
       <span data-lang="zh">流水线运行器</span>
     </h2>
+    <div class="pipeline-warning" style="background:#332200;border:1px solid #f59e0b;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;line-height:1.6;">
+      <div style="color:#f59e0b;font-weight:bold;margin-bottom:6px;">
+        <span data-lang="en">&#9888; Pipeline Mode — Not Suitable for Constrained Tasks</span>
+        <span data-lang="zh">&#9888; 流水线模式 — 不适合约束性任务</span>
+      </div>
+      <div style="color:#ccc;">
+        <span data-lang="en">This environment has no interruption points. Once submitted, the prompt executes to completion automatically.</span>
+        <span data-lang="zh">此环境无中断点，prompt 一旦提交将自动执行到底。</span>
+      </div>
+      <div style="color:#f59e0b;margin-top:8px;">
+        <span data-lang="en"><strong>Unsuitable for:</strong> minimal-diff fixes, bug fixes, preserving existing logic, "only fix X" instructions, surgical changes</span>
+        <span data-lang="zh"><strong>不适合：</strong>最小 diff 修复、bug 修复、保留现有逻辑的局部改动、"只修 X"类指令、外科手术式改动</span>
+      </div>
+      <div style="color:#10b981;margin-top:4px;">
+        <span data-lang="en"><strong>Suitable for:</strong> new code generation, scaffolding, docs/test batch generation, independent tasks</span>
+        <span data-lang="zh"><strong>适合：</strong>新代码生成、脚手架搭建、文档/测试批量生成、不依赖现有代码理解的独立任务</span>
+      </div>
+      <div style="color:#888;margin-top:6px;">
+        <span data-lang="en">For constrained tasks, use the Claude Code interactive environment instead.</span>
+        <span data-lang="zh">约束性任务请改用 Claude Code 交互式环境。</span>
+      </div>
+    </div>
+
 
     <input
       id="working-dir"
@@ -361,6 +384,38 @@ function restoreInputs() {
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────
+// ── Pipeline Guard ─────────────────────────────────────────────────────
+var CONSTRAINT_KEYWORDS = [
+  // Chinese
+  '最小 diff', '最小改动', '最小修改', '保留现有', '保留原有',
+  '不要重构', '不要修改', '不要改', '不要动', '不动',
+  '只修', '只改', '原有逻辑', '现有代码', '现有逻辑',
+  '先 Read', '先 read', '先读', '修复 bug', '修 bug',
+  '修复漏洞', '外科手术', '不要 commit', '不要提交', '不 commit',
+  // English
+  'minimum diff', 'minimal diff', 'minimal change',
+  'preserve existing', 'preserve original',
+  "don't change", "don't modify", "don't refactor",
+  'do not change', 'do not modify', 'do not refactor',
+  'only fix', 'existing logic', 'existing code',
+  'read first', 'fix bug', 'bugfix', 'surgical',
+  'no commit', "don't commit"
+];
+
+function checkConstraintKeywords(text) {
+  var lowerText = text.toLowerCase();
+  var matched = [];
+  for (var i = 0; i < CONSTRAINT_KEYWORDS.length; i++) {
+    var kw = CONSTRAINT_KEYWORDS[i];
+    // Chinese: substring match; English: case-insensitive substring match
+    if (text.indexOf(kw) !== -1 || lowerText.indexOf(kw.toLowerCase()) !== -1) {
+      matched.push(kw);
+    }
+  }
+  return matched;
+}
+
+
 async function runPipeline() {
   var msg = document.getElementById('pipeline-msg');
   var task = document.getElementById('pipeline-task').value.trim();
@@ -381,6 +436,25 @@ async function runPipeline() {
   }
 
   saveInputs();
+
+  // Guard: check for constraint keywords
+  var matchedKeywords = checkConstraintKeywords(task);
+  if (matchedKeywords.length > 0) {
+    var kwList = matchedKeywords.map(function(k) { return '"' + k + '"'; }).join(', ');
+    var proceed = confirm(
+      '⚠ Constraint keywords detected: ' + kwList + '\n\n' +
+      'Your prompt contains markers of a constrained task (minimal-diff fix,\n' +
+      'surgical change, etc.). Pipeline mode has a significantly higher failure\n' +
+      'rate for this type of task.\n\n' +
+      'Recommendation: Cancel and use Claude Code interactive environment instead.\n\n' +
+      'Click OK to continue anyway, or Cancel to abort.'
+    );
+    if (!proceed) {
+      msg.className = 'error';
+      msg.innerHTML = '<span data-lang="en">Aborted. Use Claude Code for constrained tasks.</span><span data-lang="zh">已取消。约束性任务请使用 Claude Code。</span>';
+      return;
+    }
+  }
 
   msg.className='';
   msg.innerHTML = '<span data-lang="en">Running...</span><span data-lang="zh">运行中...</span>';

@@ -260,11 +260,68 @@ async function cmdSetup() {
 
 // ─── Pipeline runner ────────────────────────────────────────────────
 
+const PIPELINE_CONSTRAINT_WARNING = [
+  '\x1b[33m⚠  Pipeline Mode — Not Suitable for Constrained Tasks\x1b[0m',
+  '',
+  'This environment has no interruption points. Once submitted,',
+  'the prompt executes to completion automatically.',
+  '',
+  '\x1b[33mUnsuitable for:\x1b[0m minimal-diff fixes, bug fixes, preserving',
+  'existing logic, "only fix X" instructions, surgical changes.',
+  '',
+  '\x1b[32mSuitable for:\x1b[0m new code generation, scaffolding,',
+  'docs/test batch generation, independent tasks.',
+  '',
+  'For constrained tasks, use the Claude Code interactive environment.',
+  '',
+].join('\n');
+
+const CONSTRAINT_KEYWORDS = [
+  // Chinese
+  '最小 diff', '最小改动', '最小修改', '保留现有', '保留原有',
+  '不要重构', '不要修改', '不要改', '不要动', '不动',
+  '只修', '只改', '原有逻辑', '现有代码', '现有逻辑',
+  '先 Read', '先 read', '先读', '修复 bug', '修 bug',
+  '修复漏洞', '外科手术', '不要 commit', '不要提交', '不 commit',
+  // English
+  'minimum diff', 'minimal diff', 'minimal change',
+  'preserve existing', 'preserve original',
+  "don't change", "don't modify", "don't refactor",
+  'do not change', 'do not modify', 'do not refactor',
+  'only fix', 'existing logic', 'existing code',
+  'read first', 'fix bug', 'bugfix', 'surgical',
+  'no commit', "don't commit",
+];
+
 async function cmdRun(task) {
   if (!(await ensureConfig())) return;
   if (!isRunning()) {
     console.log('Proxy is not running. Start it first: cmr start');
     process.exit(1);
+  }
+
+  process.stderr.write(PIPELINE_CONSTRAINT_WARNING + '\n\n');
+
+  // Guard: check for constraint keywords
+  if (!process.env.PIPELINE_GUARD_DISABLED) {
+    const hits = CONSTRAINT_KEYWORDS.filter((kw) => task.includes(kw));
+    if (hits.length > 0) {
+      const joined = hits.map((k) => `"${k}"`).join(', ');
+      process.stderr.write(`\x1b[33mConstraint keywords detected: ${joined}\x1b[0m\n`);
+      process.stderr.write('This task appears unsuitable for pipeline mode.\n');
+      process.stderr.write('Recommendation: use Claude Code interactive environment instead.\n');
+      process.stderr.write('To bypass: set PIPELINE_GUARD_DISABLED=1\n\n');
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      const answer = await new Promise((resolve) => {
+        rl.question('Continue anyway? [y/N]: ', (a) => resolve(a.trim().toLowerCase()));
+      });
+      rl.close();
+      if (answer !== 'y' && answer !== 'yes') {
+        process.stderr.write('Aborted. Use Claude Code for constrained tasks.\n');
+        process.exit(1);
+      }
+      process.stderr.write('\n');
+    }
   }
 
   const config = readConfig();

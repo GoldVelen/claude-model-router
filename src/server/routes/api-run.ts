@@ -2,6 +2,7 @@ import { type IncomingMessage, type ServerResponse } from 'node:http';
 import { getConfig } from '../../config.js';
 import { getPipelineStages, runPipeline, type PipelineContext } from '../../pipeline.js';
 import { createJob, getJob, updateJob, updateStage } from '../job-store.js';
+import { checkConstraintKeywords } from '../../pipeline-guards/guard.js';
 
 export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): boolean {
   const url = req.url ?? '';
@@ -33,6 +34,20 @@ export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): bo
         if (!task) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Task is required' }));
+          return;
+        }
+
+        const guardResult = checkConstraintKeywords(task);
+        if (guardResult.triggered) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            error: 'Constraint keywords detected',
+            guardWarning: {
+              message: 'This task contains constraint keywords indicating it is unsuitable for pipeline mode.',
+              matchedKeywords: guardResult.matchedKeywords,
+              hint: 'Use Claude Code interactive environment instead, or set PIPELINE_GUARD_DISABLED=1 to bypass.',
+            },
+          }));
           return;
         }
 
