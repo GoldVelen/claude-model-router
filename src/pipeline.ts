@@ -74,6 +74,29 @@ Plan:
 Implementation:
 {implement}`,
   },
+  execute: {
+    model: 'dsf',
+    prompt: `You are the code executor. Extract all code blocks from the implementation and format them for file writing.
+
+RULES:
+- Find all code blocks in the implementation text
+- For each code block, identify the file path
+- Output in this exact format:
+
+\`\`\`typescript:src/example.ts
+// code here
+\`\`\`
+
+Or use:
+
+File: src/example.ts
+\`\`\`typescript
+// code here
+\`\`\`
+
+Implementation to parse:
+{implement}`,
+  },
   report: {
     model: 'dsf',
     prompt: `You are the reporter. Create a concise summary in markdown. Focus on WHAT changed and whether the implementation matches the plan.
@@ -225,7 +248,12 @@ export async function runPipeline(
   task: string,
   config: Config,
   port: number,
-  options?: { timeoutPerStage?: number; signal?: AbortSignal },
+  options?: {
+    timeoutPerStage?: number;
+    signal?: AbortSignal;
+    workingDir?: string;
+    autoCommit?: boolean;
+  },
 ): Promise<PipelineResult> {
   const stages = getPipelineStages(config);
   const stageNames = Object.keys(stages);
@@ -274,6 +302,52 @@ export async function runPipeline(
         failedStages.push(name);
         ctx[name] = `[ERROR: ${message}]`;
       }
+    }
+  }
+
+  if (options?.workingDir && ctx.implement) {
+    try {
+      const { executeCodeChanges, runTests, gitCommit } = await import('./executor.js');
+
+      const executeResult = await executeCodeChanges(ctx.implement, {
+        workingDir: options.workingDir,
+        dryRun: false,
+      });
+
+      ctx.executeResult = JSON.stringify(executeResult, null, 2);
+
+      if (executeResult.filesWritten.length > 0) {
+        process.stderr.write(`[execute] Wrote ${executeResult.filesWritten.length} files\n`);
+
+        const testResult = await runTests(options.workingDir);
+        ctx.testExecution = testResult.output;
+
+        if (testResult.success) {
+          process.stderr.write('[execute] Tests passed\n');
+
+          if (options.autoCommit) {
+            const commitMsg = `feat: ${task}\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`;
+            const commitResult = await gitCommit(options.workingDir, commitMsg);
+            ctx.gitCommit = commitResult.output;
+
+            if (commitResult.success) {
+              process.stderr.write('[execute] Changes committed\n');
+            } else {
+              process.stderr.write(`[execute] Commit failed: ${commitResult.output}\n`);
+            }
+          }
+        } else {
+          process.stderr.write(`[execute] Tests failed:\n${testResult.output}\n`);
+        }
+      }
+
+      if (executeResult.errors.length > 0) {
+        process.stderr.write(`[execute] Errors: ${executeResult.errors.join(', ')}\n`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[execute] Failed: ${message}\n`);
+      ctx.executeError = message;
     }
   }
 

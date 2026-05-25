@@ -32,7 +32,11 @@ export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): bo
     req.on('data', (chunk) => (body += chunk));
     req.on('end', async () => {
       try {
-        const { task } = JSON.parse(body) as { task?: string };
+        const { task, workingDir, autoCommit } = JSON.parse(body) as {
+          task?: string;
+          workingDir?: string;
+          autoCommit?: boolean;
+        };
         if (!task) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Task is required' }));
@@ -44,7 +48,10 @@ export function handleApiRunRoute(req: IncomingMessage, res: ServerResponse): bo
         const jobId = `run-${Date.now()}`;
         jobs.set(jobId, { status: 'running' });
 
-        const result: PipelineResult = await runPipeline(task, config, port);
+        const result: PipelineResult = await runPipeline(task, config, port, {
+          workingDir,
+          autoCommit: autoCommit ?? false,
+        });
         jobs.set(jobId, { status: 'done', ctx: result.ctx });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -142,7 +142,34 @@
       <span data-lang="en">Pipeline Runner</span>
       <span data-lang="zh">流水线运行器</span>
     </h2>
-    <textarea id="pipeline-task" class="mb" placeholder="Enter task description..."></textarea>
+
+    <input
+      id="working-dir"
+      class="mb"
+      placeholder="/path/to/project (optional)"
+      style="font-size:12px;"
+    >
+
+    <textarea
+      id="pipeline-task"
+      class="mb"
+      placeholder="Enter task description..."
+    ></textarea>
+
+    <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+      <label style="font-size:12px; color:#888; display:flex; align-items:center; gap:4px; cursor:pointer;">
+        <input type="checkbox" id="auto-execute" checked style="width:auto; margin:0;">
+        <span data-lang="en">Auto-execute code</span>
+        <span data-lang="zh">自动执行代码</span>
+      </label>
+
+      <label style="font-size:12px; color:#888; display:flex; align-items:center; gap:4px; cursor:pointer;">
+        <input type="checkbox" id="auto-commit" style="width:auto; margin:0;">
+        <span data-lang="en">Auto-commit on success</span>
+        <span data-lang="zh">成功后自动提交</span>
+      </label>
+    </div>
+
     <div style="display:flex; gap:8px; align-items:center;">
       <button onclick="runPipeline()">
         <span data-lang="en">Run Pipeline</span>
@@ -293,18 +320,50 @@ async function saveConfig() {
 async function runPipeline() {
   var msg = document.getElementById('pipeline-msg');
   var task = document.getElementById('pipeline-task').value.trim();
+  var workingDir = document.getElementById('working-dir').value.trim();
+  var autoCommit = document.getElementById('auto-commit').checked;
+  var autoExecute = document.getElementById('auto-execute').checked;
+
   if (!task) {
     msg.className='error';
     msg.innerHTML = '<span data-lang="en">Enter a task description</span><span data-lang="zh">输入任务描述</span>';
     return;
   }
-  msg.className=''; msg.textContent = 'Running...';
+
+  if (autoExecute && !workingDir) {
+    msg.className='error';
+    msg.innerHTML = '<span data-lang="en">Working directory required for auto-execute</span><span data-lang="zh">自动执行需要指定工作目录</span>';
+    return;
+  }
+
+  msg.className='';
+  msg.innerHTML = '<span data-lang="en">Running...</span><span data-lang="zh">运行中...</span>';
+
   try {
-    var r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task:task})});
+    var payload = { task: task };
+    if (autoExecute && workingDir) {
+      payload.workingDir = workingDir;
+      payload.autoCommit = autoCommit;
+    }
+
+    var r = await fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+
     var d = await r.json();
-    msg.className = d.jobId?'success':'error';
-    msg.textContent = d.jobId?('Submitted: ' + d.jobId):(d.error||'Failed');
-  } catch(e) { msg.className='error'; msg.textContent=e.message; }
+    msg.className = d.jobId ? 'success' : 'error';
+
+    if (d.jobId) {
+      msg.innerHTML = '<span data-lang="en">Submitted: ' + d.jobId + '</span><span data-lang="zh">已提交: ' + d.jobId + '</span>';
+    } else {
+      msg.textContent = d.error || 'Failed';
+    }
+  } catch(e) {
+    msg.className='error';
+    msg.textContent = e.message;
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────
