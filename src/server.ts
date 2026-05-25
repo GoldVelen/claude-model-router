@@ -10,6 +10,8 @@ import { handleWebRoute } from './server/routes/web.js';
 import { handleApiConfigRoute } from './server/routes/api-config.js';
 import { handleApiRunRoute } from './server/routes/api-run.js';
 import { handleApiLogsRoute } from './server/routes/api-logs.js';
+import { handleLoginRoute } from './server/routes/login.js';
+import { checkAuth } from './server/middleware/auth.js';
 import { statsMiddleware } from './stats/stats-middleware.js';
 
 type ProxyResult = { success: false; statusCode: number; error?: string }
@@ -82,12 +84,14 @@ function findBackendName(backend: BackendConfig): string {
 
 export function createServer(): http.Server {
   return http.createServer((req, res) => {
+    if (handleLoginRoute(req, res)) return;
+    if (handleStatsRoute(req, res)) return;
+    if (handleLogsRoute(req, res)) return;
+    if (!checkAuth(req, res)) return;
     if (handleWebRoute(req, res)) return;
     if (handleApiConfigRoute(req, res)) return;
     if (handleApiRunRoute(req, res)) return;
     if (handleApiLogsRoute(req, res)) return;
-    if (handleStatsRoute(req, res)) return;
-    if (handleLogsRoute(req, res)) return;
 
     if (req.method !== 'POST') {
       res.writeHead(404).end();

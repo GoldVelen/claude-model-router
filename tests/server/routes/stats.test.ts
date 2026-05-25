@@ -1,8 +1,8 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
-import { createServer } from '../../src/server.js';
-import { resetStats, recordRequest } from '../../src/stats/stats-store.js';
+import { createServer } from '../../../src/server.js';
+import { resetStats, recordRequest } from '../../../src/stats/stats-store.js';
 
 function get(url: string, port: number): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
@@ -61,7 +61,4 @@ describe('GET /stats', () => {
     assert.strictEqual(status, 404);
   });
 
-  afterEach(() => {
-    server.close();
-  });
 });
