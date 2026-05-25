@@ -1,6 +1,6 @@
 {
   "name": "claude-model-router",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Zero-dependency Anthropic-format API proxy for Claude Code. Multi-backend routing, hot reload, config validation, and detailed logging.",
   "keywords": [
     "claude-code",

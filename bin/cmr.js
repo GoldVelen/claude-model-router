@@ -769,6 +769,55 @@ async function cmdDashboard() {
   process.exit(0);
 }
 
+// ─── Update ──────────────────────────────────────────────────────────
+
+async function cmdUpdate() {
+  console.log('Checking for updates...');
+
+  const pkgPath = join(PROJECT_DIR, 'package.json');
+  let currentVersion = '0.0.0';
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    currentVersion = pkg.version || '0.0.0';
+  } catch { /* ignore */ }
+
+  const { checkForUpdate } = await import(
+    pathToFileURL(join(PROJECT_DIR, 'dist', 'utils', 'update-checker.js')).href
+  );
+  const result = await checkForUpdate(currentVersion);
+
+  if (!result.updateAvailable) {
+    console.log(`Already up to date (v${result.current})`);
+    return;
+  }
+
+  console.log(`\x1b[33mUpdate available: v${result.current} → v${result.latest}\x1b[0m`);
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
+  const install = await ask('Install now? [Y/n]: ');
+  rl.close();
+
+  if (install.toLowerCase() === 'n') {
+    console.log('Skipped. Run `npm install -g claude-model-router` to update later.');
+    return;
+  }
+
+  console.log('Installing...');
+  const child = spawn('npm', ['install', '-g', 'claude-model-router'], {
+    stdio: 'inherit',
+    shell: true,
+  });
+
+  child.on('exit', (code) => {
+    if (code === 0) {
+      console.log(`\nUpdated to v${result.latest}. Run 'cmr restart' to restart the proxy.`);
+    } else {
+      console.log(`\nInstall failed (exit code ${code}). Try manually: npm install -g claude-model-router`);
+    }
+  });
+}
+
 // ─── Help ───────────────────────────────────────────────────────────
 
 function cmdHelp() {
@@ -790,6 +839,7 @@ Commands:
   dashboard Real-time monitoring dashboard (press 'q' to quit)
   logs      Show last 50 log lines
   config    Show current config (api keys redacted)
+  update    Check for updates and install
   run       Run task through model pipeline
             cmr run <task>                  # Single-line task
             cmr run                         # Interactive multi-line input
@@ -826,6 +876,7 @@ async function main() {
     case 'dashboard': await cmdDashboard(); break;
     case 'logs':    cmdLogs(); break;
     case 'config':  cmdConfigShow(); break;
+    case 'update':  await cmdUpdate(); break;
     case 'setup':   await cmdSetup(); break;
     case 'run': {
       const mode = process.argv[3];
