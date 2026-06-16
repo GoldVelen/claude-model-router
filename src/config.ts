@@ -2,10 +2,10 @@ import { type Config } from './types.js';
 import { validateConfig } from './validator.js';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-const CONFIG_DIR = join(homedir(), '.config', 'claude-model-router');
-const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
+const CONFIG_PATH = process.env['CMR_CONFIG_PATH'] || join(homedir(), '.config', 'claude-model-router', 'config.json');
+const CONFIG_DIR = dirname(CONFIG_PATH);
 const DATA_DIR = join(homedir(), '.local', 'share', 'claude-model-router');
 
 const DEFAULT_ALIASES: Record<string, string> = {
@@ -14,6 +14,8 @@ const DEFAULT_ALIASES: Record<string, string> = {
   opus: 'claude-opus-4-7',
   sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5',
+  local: 'qwen3-coder:30b',
+  qwen: 'qwen3-coder:30b',
 };
 
 function createDefaultConfig(): Config {
@@ -26,6 +28,7 @@ function createDefaultConfig(): Config {
         apiKey: '',
         path: '/anthropic/v1/messages',
         modelPattern: '^deepseek-',
+        protocol: 'anthropic' as const,
         sanitizer: 'deepseek' as const,
       },
       claude: {
@@ -33,9 +36,18 @@ function createDefaultConfig(): Config {
         apiKey: '',
         path: '/v1/messages',
         modelPattern: '^claude-',
+        protocol: 'anthropic' as const,
+      },
+      ollama: {
+        url: 'http://127.0.0.1:11434',
+        apiKey: 'ollama',
+        path: '/v1/chat/completions',
+        modelPattern: '^(qwen3-coder:|qwen2\\.5-coder:|llama3\\.|codellama|deepseek-coder|local/)',
+        protocol: 'openai-chat' as const,
       },
     },
     aliases: { ...DEFAULT_ALIASES },
+    routingTags: {},
   };
 }
 
@@ -60,7 +72,22 @@ function readOrCreateConfig(): Config {
       parsed['backends'] = migrateBackends(parsed['backends'] as Record<string, Record<string, unknown>>);
     }
 
-    const merged = { ...defaults, ...parsed } as unknown as Config;
+    const merged = {
+      ...defaults,
+      ...parsed,
+      backends: {
+        ...defaults.backends,
+        ...(parsed['backends'] as Record<string, unknown> | undefined),
+      },
+      aliases: {
+        ...defaults.aliases,
+        ...(parsed['aliases'] as Record<string, unknown> | undefined),
+      },
+      routingTags: {
+        ...defaults.routingTags,
+        ...(parsed['routingTags'] as Record<string, unknown> | undefined),
+      },
+    } as unknown as Config;
 
     const errors = validateConfig(merged as unknown as Record<string, unknown>);
     if (errors.length > 0) {
@@ -86,6 +113,9 @@ function applyEnvOverrides(config: Config): Config {
   if (backends['claude'] && process.env['CMR_CLAUDE_KEY']) {
     backends['claude'] = { ...backends['claude'], apiKey: process.env['CMR_CLAUDE_KEY'] };
   }
+  if (backends['ollama'] && process.env['CMR_OLLAMA_KEY']) {
+    backends['ollama'] = { ...backends['ollama'], apiKey: process.env['CMR_OLLAMA_KEY'] };
+  }
 
   return {
     ...config,
@@ -102,11 +132,22 @@ function migrateBackends(backends: Record<string, Record<string, unknown>>): Rec
     if (name === 'deepseek' && !migrated[name].path) {
       migrated[name].path = '/anthropic/v1/messages';
       migrated[name].modelPattern = migrated[name].modelPattern || '^deepseek-';
+      migrated[name].protocol = migrated[name].protocol || 'anthropic';
       migrated[name].sanitizer = migrated[name].sanitizer || 'deepseek';
     }
     if (name === 'claude' && !migrated[name].path) {
       migrated[name].path = '/v1/messages';
       migrated[name].modelPattern = migrated[name].modelPattern || '^claude-';
+      migrated[name].protocol = migrated[name].protocol || 'anthropic';
+    }
+    if (!migrated[name].protocol) {
+      if (String(migrated[name].path || '').includes('/chat/completions')) {
+        migrated[name].protocol = 'openai-chat';
+      } else if (String(migrated[name].path || '').includes('/responses')) {
+        migrated[name].protocol = 'openai-responses';
+      } else {
+        migrated[name].protocol = 'anthropic';
+      }
     }
   }
   return migrated;

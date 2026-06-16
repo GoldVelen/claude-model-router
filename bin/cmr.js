@@ -42,7 +42,7 @@ async function ensureConfig() {
     console.log('');
     console.log('Run `cmr setup` to create a config file, or create one manually:');
     console.log(`  mkdir -p ${CONFIG_DIR}`);
-    console.log(`  echo \'{"port":3457,"logLevel":"info","backends":{},"aliases":{}}\' > ${CONFIG_PATH}`);
+    console.log(`  echo \'{"port":3457,"logLevel":"info","backends":{},"aliases":{},"routingTags":{}}\' > ${CONFIG_PATH}`);
     rl.close();
     return false;
   }
@@ -196,6 +196,7 @@ const DEFAULT_BACKEND_TEMPLATES = {
     url: 'https://api.deepseek.com',
     path: '/anthropic/v1/messages',
     modelPattern: '^deepseek-',
+    protocol: 'anthropic',
     sanitizer: 'deepseek',
     desc: 'DeepSeek API（兼容 Anthropic 协议）',
   },
@@ -203,7 +204,22 @@ const DEFAULT_BACKEND_TEMPLATES = {
     url: 'https://api.anthropic.com',
     path: '/v1/messages',
     modelPattern: '^claude-',
+    protocol: 'anthropic',
     desc: 'Anthropic API（或兼容服务，如 socheap.ai）',
+  },
+  openai: {
+    url: 'https://api.openai.com',
+    path: '/v1/chat/completions',
+    modelPattern: '^gpt-|^o[134]($|-)',
+    protocol: 'openai-chat',
+    desc: 'OpenAI Chat Completions（兼容 Codex 自定义 provider）',
+  },
+  ollama: {
+    url: 'http://127.0.0.1:11434',
+    path: '/v1/chat/completions',
+    modelPattern: '^(qwen3-coder:|qwen2\\.5-coder:|llama3\\.|codellama|deepseek-coder)',
+    protocol: 'openai-chat',
+    desc: '本机 Ollama（OpenAI Chat Completions 兼容接口）',
   },
 };
 
@@ -226,7 +242,7 @@ async function cmdSetup() {
 
   // Port
   const defaultPort = existing?.port || 3457;
-  const portStr = await ask(`代理端口 ── 供 Claude Code 连接 [${defaultPort}]: `);
+  const portStr = await ask(`代理端口 ── 供 Claude Code / Codex 连接 [${defaultPort}]: `);
   const port = parseInt(portStr, 10) || defaultPort;
 
   // Backends
@@ -253,6 +269,7 @@ async function cmdSetup() {
       const defaultPath = existingBe?.path || DEFAULT_BACKEND_TEMPLATES[name]?.path || '/v1/messages';
       const defaultPattern = existingBe?.modelPattern || DEFAULT_BACKEND_TEMPLATES[name]?.modelPattern || '';
       const defaultDesc = DEFAULT_BACKEND_TEMPLATES[name]?.desc || '';
+      const defaultProtocol = existingBe?.protocol || DEFAULT_BACKEND_TEMPLATES[name]?.protocol || 'anthropic';
 
       const urlPrompt = `  ${name} 的 API 地址${defaultDesc ? ` ── ${defaultDesc}` : ''} [${defaultUrl}]: `;
       const url = await ask(urlPrompt) || defaultUrl;
@@ -260,7 +277,10 @@ async function cmdSetup() {
       const apiKeyPrompt = `  ${name} 的 API 密钥${existingBe?.apiKey ? ' [已配置，回车保留]' : ''}: `;
       const apiKey = await ask(apiKeyPrompt) || existingBe?.apiKey || '';
 
-      const pathPrompt = `  ${name} 的请求路径 ── 后端接收 Messages API 的路径 [${defaultPath}]: `;
+      const protocolPrompt = `  ${name} 的协议族 ── anthropic / openai-chat / openai-responses [${defaultProtocol}]: `;
+      const protocol = await ask(protocolPrompt) || defaultProtocol;
+
+      const pathPrompt = `  ${name} 的请求路径 [${defaultPath}]: `;
       const path = await ask(pathPrompt) || defaultPath;
 
       const patternPrompt = `  ${name} 的模型匹配 ── 正则表达式，匹配到的模型名将路由到此后端 [${defaultPattern}]: `;
@@ -270,7 +290,7 @@ async function cmdSetup() {
         ? (await ask(`  ${name} 是否启用 DeepSeek 净化器？── 移除 thinking 字段并规范化 tool_choice [Y/n]: `)).toLowerCase() !== 'n'
         : false;
 
-      const backend = { url, apiKey, path, modelPattern };
+      const backend = { url, apiKey, path, modelPattern, protocol };
       if (useSanitizer) backend.sanitizer = 'deepseek';
       backends[name] = backend;
       first = false;
@@ -288,7 +308,8 @@ async function cmdSetup() {
 
   // Aliases
   const existingAliases = existing?.aliases || {};
-  console.log('\n模型别名 ── 方便 Claude Code 中 /model 切换（可选，回车跳过）：');
+  const existingRoutingTags = existing?.routingTags || {};
+  console.log('\n模型别名 ── 方便 Claude Code / Codex 中 /model 切换（可选，回车跳过）：');
   if (Object.keys(existingAliases).length > 0) {
     console.log(`  已有别名: ${Object.entries(existingAliases).map(([k, v]) => `${k}→${v}`).join(', ')}`);
   }
@@ -308,13 +329,30 @@ async function cmdSetup() {
     opus: 'claude-opus-4-7',
     sonnet: 'claude-sonnet-4-6',
     haiku: 'claude-haiku-4-5',
+    local: 'qwen3-coder:30b',
+    qwen: 'qwen3-coder:30b',
   };
+
+  console.log('\nprompt 路由标签 ── 供 `cmr:<tag>` 在单次请求内覆盖模型（可选，回车跳过）：');
+  if (Object.keys(existingRoutingTags).length > 0) {
+    console.log(`  已有标签: ${Object.entries(existingRoutingTags).map(([k, v]) => `${k}→${v}`).join(', ')}`);
+  }
+  const routingTags = {};
+  while (true) {
+    const tag = await ask('  标签（如 dsp, opus4.8） [回车完成]: ');
+    if (!tag) break;
+    const defaultModel = existingRoutingTags[tag] || (routingTags[tag] || existingAliases[tag] || aliases[tag] || '');
+    const modelPrompt = `  ${tag} 对应的真实模型${defaultModel ? ` [${defaultModel}]` : ''}: `;
+    const model = await ask(modelPrompt) || defaultModel;
+    if (model) routingTags[tag] = model;
+  }
 
   const config = {
     port,
     logLevel: 'info',
     backends,
     aliases: Object.keys(aliases).length > 0 ? aliases : (Object.keys(existingAliases).length > 0 ? existingAliases : defaultAliases),
+    routingTags: Object.keys(routingTags).length > 0 ? routingTags : existingRoutingTags,
   };
 
   ensureDir(CONFIG_DIR);

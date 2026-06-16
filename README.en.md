@@ -1,12 +1,12 @@
 # claude-model-router
 
-> Lightweight reverse proxy for Claude Code that routes requests to different LLM backends based on model name — no more switching configs and restarting.
+> Lightweight reverse proxy for Claude Code and Codex that routes requests to different LLM backends based on model name — no more switching configs and restarting.
 >
 > [中文](./README.md)
 
 ## Features
 
-- **Multi-backend routing** — Route models to any number of Anthropic-compatible backends (DeepSeek, OpenRouter, etc.) by configurable regex patterns
+- **Multi-backend routing** — Route models to any number of backends (Anthropic, OpenAI Chat/Responses, DeepSeek, etc.) by configurable regex patterns
 - **Zero-dependency** — Only uses Node.js built-in modules
 - **Hot reload** — Edit `config.json` without restarting the proxy
 - **Config validation** — Clear error messages on invalid config
@@ -16,8 +16,8 @@
 
 ```
 ┌─────────────┐     POST /v1/messages     ┌──────────────────┐
-│  Claude     │ ────────────────────────── │  cmr (port 3457) │
-│  Code       │  ANTHROPIC_BASE_URL=       │                  │
+│  Claude /   │ ────────────────────────── │  cmr (port 3457) │
+│  Codex      │  Base URL points to proxy   │                  │
 │  (any       │  http://127.0.0.1:3457     │  reads model     │
 │   session)  │                            │  from request    │
 └─────────────┘                            └────────┬─────────┘
@@ -69,13 +69,22 @@ Create `~/.config/claude-model-router/config.json`:
       "url": "https://api.deepseek.com",
       "apiKey": "sk-your-deepseek-key",
       "path": "/anthropic/v1/messages",
-      "modelPattern": "^deepseek-"
+      "modelPattern": "^deepseek-",
+      "protocol": "anthropic"
     },
     "claude": {
       "url": "https://api.anthropic.com",
       "apiKey": "sk-ant-your-key",
       "path": "/v1/messages",
-      "modelPattern": "^claude-"
+      "modelPattern": "^claude-",
+      "protocol": "anthropic"
+    },
+    "ollama": {
+      "url": "http://127.0.0.1:11434",
+      "apiKey": "ollama",
+      "path": "/v1/chat/completions",
+      "modelPattern": "^qwen3-coder:",
+      "protocol": "openai-chat"
     }
   },
   "aliases": {
@@ -83,7 +92,17 @@ Create `~/.config/claude-model-router/config.json`:
     "dsf": "deepseek-v4-flash",
     "opus": "claude-opus-4-7",
     "sonnet": "claude-sonnet-4-6",
-    "haiku": "claude-haiku-4-5"
+    "haiku": "claude-haiku-4-5",
+    "local": "qwen3-coder:30b",
+    "qwen": "qwen3-coder:30b"
+  },
+  "routingTags": {
+    "gpt55": "gpt-5.5",
+    "dsp": "deepseek-v4-pro",
+    "dsf": "deepseek-v4-flash",
+    "opus4.8": "claude-opus-4-8",
+    "local": "qwen3-coder:30b",
+    "qwen": "qwen3-coder:30b"
   }
 }
 ```
@@ -96,6 +115,7 @@ Create `~/.config/claude-model-router/config.json`:
 | `apiKey` | Yes | — | API key for authentication |
 | `path` | No | `/v1/messages` | Request path forwarded to backend |
 | `modelPattern` | No | — | Regex pattern to match model names against this backend |
+| `protocol` | No | `anthropic` | Request family: `anthropic`, `openai-chat`, or `openai-responses` |
 | `sanitizer` | No | `"none"` | Request sanitizer (`"deepseek"` strips `thinking` field and normalizes `tool_choice`) |
 
 ### Env var overrides
@@ -105,9 +125,34 @@ Create `~/.config/claude-model-router/config.json`:
 | `CMR_PORT` | `config.port` |
 | `CMR_DEEPSEEK_KEY` | `config.backends.deepseek.apiKey` |
 | `CMR_CLAUDE_KEY` | `config.backends.claude.apiKey` |
+| `CMR_OLLAMA_KEY` | `config.backends.ollama.apiKey` |
 | `CMR_LOG_LEVEL` | `config.logLevel` |
 
-Backend-specific env vars only affect backends named `deepseek` or `claude` (backward compatible).
+Backend-specific env vars only affect backends named `deepseek`, `claude`, or `ollama` (backward compatible).
+
+## Local model example
+
+If you run `Ollama` locally, you can fold local models into the same routing layer:
+
+```json
+{
+  "backends": {
+    "ollama": {
+      "url": "http://127.0.0.1:11434",
+      "apiKey": "ollama",
+      "path": "/v1/chat/completions",
+      "modelPattern": "^qwen3-coder:",
+      "protocol": "openai-chat"
+    }
+  },
+  "routingTags": {
+    "local": "qwen3-coder:30b",
+    "qwen": "qwen3-coder:30b"
+  }
+}
+```
+
+Then `cmr:local` or `cmr:qwen` in the prompt will route that request to local Ollama without changing client config or restarting the session.
 
 ## Usage
 
@@ -124,23 +169,48 @@ cmr restart   # Restart
 cmr run       # Run task through model pipeline
 ```
 
-Then set in Claude Code settings (`~/.claude/settings.json`):
+Then point Claude Code or Codex at the local proxy:
+
+Claude Code:
 
 ```json
-"env": {
-  "ANTHROPIC_BASE_URL": "http://127.0.0.1:3457"
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:3457"
+  }
 }
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+openai_base_url = "http://127.0.0.1:3457"
 ```
 
 Now switch models mid-session with `/model`:
 
 ```
+/model g55    → gpt-5.5         via OpenAI-compatible proxy
 /model opus   → claude-opus-4-7  via api.anthropic.com      (complex)
 /model dsp    → deepseek-v4-pro  via api.deepseek.com  (daily driver)
 /model dsf    → deepseek-v4-flash via api.deepseek.com (cheap & fast)
 /model sonnet → claude-sonnet-4-6 via api.anthropic.com      (balanced)
 /model haiku  → claude-haiku-4-5  via api.anthropic.com      (lightweight)
 ```
+
+### Prompt Routing
+
+Write `cmr:<tag>` in your prompt to override the actual model for that request. The proxy strips the control token before forwarding.
+
+Examples:
+
+```text
+cmr:dsp analyze this error
+cmr:opus4.8 fix this bug
+```
+
+`tag` is resolved from `routingTags` first, then falls back to `aliases` for backward compatibility. This only routes at the proxy layer; it does not auto-enable any local Codex configuration.
+Put `cmr:<tag>` at the start of the latest user input for the most predictable behavior.
 
 ## v0.3.0 Features
 
@@ -212,7 +282,7 @@ On startup and hot reload, cmr validates every config field. Invalid config on r
 
 ## Custom aliases
 
-Edit the `aliases` section in your config:
+Edit the `aliases` section in your config for `/model`-style session switching:
 
 ```json
 {
@@ -224,12 +294,29 @@ Edit the `aliases` section in your config:
 }
 ```
 
+## Prompt routing tags
+
+Edit the `routingTags` section for one-off `cmr:<tag>` prompt routing:
+
+```json
+{
+  "routingTags": {
+    "gpt55": "gpt-5.5",
+    "dsp": "deepseek-v4-pro",
+    "dsf": "deepseek-v4-flash",
+    "opus4.8": "claude-opus-4-8"
+  }
+}
+```
+
+`routingTags` takes priority over `aliases`; legacy configs can keep using `aliases` for backward compatibility.
+
 ## Upgrade from v0.1.x
 
 cmr v0.3.0 is fully backward-compatible with v0.1.x and v0.2.x configs. On first load:
 
 1. The old `backends` format (with `url` + `apiKey` only) is auto-migrated to the new format with default `path`, `modelPattern`, and `sanitizer` values
-2. Environment variables `CMR_DEEPSEEK_KEY` and `CMR_CLAUDE_KEY` still work
+2. Environment variables `CMR_DEEPSEEK_KEY`, `CMR_CLAUDE_KEY`, and `CMR_OLLAMA_KEY` still work
 3. Logging now displays backend URL hostnames instead of hardcoded service names
 4. The hot reload watcher is automatically active — no configuration needed
 

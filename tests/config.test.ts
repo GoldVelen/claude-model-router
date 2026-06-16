@@ -1,17 +1,27 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const ORIG_ENV = { ...process.env };
+const TEST_CONFIG_DIR = join(tmpdir(), `cmr-config-test-${process.pid}`);
+const TEST_CONFIG_PATH = join(TEST_CONFIG_DIR, 'config.json');
 
 describe('loadConfig', () => {
   beforeEach(() => {
     delete process.env['CMR_PORT'];
     delete process.env['CMR_DEEPSEEK_KEY'];
     delete process.env['CMR_CLAUDE_KEY'];
+    delete process.env['CMR_OLLAMA_KEY'];
+    if (!existsSync(TEST_CONFIG_DIR)) mkdirSync(TEST_CONFIG_DIR, { recursive: true });
+    rmSync(TEST_CONFIG_PATH, { force: true });
+    process.env['CMR_CONFIG_PATH'] = TEST_CONFIG_PATH;
   });
 
   afterEach(() => {
     process.env = { ...ORIG_ENV };
+    rmSync(TEST_CONFIG_PATH, { force: true });
   });
 
   it('reads CMR_PORT from env', async () => {
@@ -35,6 +45,13 @@ describe('loadConfig', () => {
     assert.strictEqual(config.backends.claude.apiKey, 'cl-key-env');
   });
 
+  it('reads CMR_OLLAMA_KEY from env', async () => {
+    process.env['CMR_OLLAMA_KEY'] = 'ollama-env';
+    const { loadConfig } = await import('../src/config.js');
+    const config = loadConfig();
+    assert.strictEqual(config.backends.ollama.apiKey, 'ollama-env');
+  });
+
   it('has default aliases', async () => {
     const { loadConfig } = await import('../src/config.js');
     const config = loadConfig();
@@ -43,5 +60,40 @@ describe('loadConfig', () => {
     assert.strictEqual(config.aliases['dsf'], 'deepseek-v4-flash');
     assert.strictEqual(config.aliases['sonnet'], 'claude-sonnet-4-6');
     assert.strictEqual(config.aliases['haiku'], 'claude-haiku-4-5');
+    assert.strictEqual(config.aliases['local'], 'qwen3-coder:30b');
+    assert.strictEqual(config.aliases['qwen'], 'qwen3-coder:30b');
+  });
+
+  it('has empty routingTags by default', async () => {
+    const { loadConfig } = await import('../src/config.js');
+    const config = loadConfig();
+    assert.deepStrictEqual(config.routingTags, {});
+  });
+
+  it('merges new default backends and aliases into existing config', async () => {
+    writeFileSync(TEST_CONFIG_PATH, JSON.stringify({
+      port: 3457,
+      logLevel: 'info',
+      backends: {
+        deepseek: {
+          url: 'https://api.deepseek.com',
+          apiKey: 'test-ds-key',
+        },
+        claude: {
+          url: 'https://api.anthropic.com',
+          apiKey: 'test-cl-key',
+        },
+      },
+      aliases: {
+        dsp: 'deepseek-v4-pro',
+      },
+    }), 'utf-8');
+
+    const { loadConfig } = await import('../src/config.js');
+    const config = loadConfig();
+    assert.ok(config.backends.ollama);
+    assert.strictEqual(config.backends.ollama.url, 'http://127.0.0.1:11434');
+    assert.strictEqual(config.aliases['local'], 'qwen3-coder:30b');
+    assert.strictEqual(config.aliases['qwen'], 'qwen3-coder:30b');
   });
 });

@@ -1,12 +1,12 @@
 # claude-model-router
 
-> 为 Claude Code 设计的轻量反向代理。根据模型名自动将请求路由到不同的 LLM 后端，会话内通过 `/model` 一键切换，无需重启。
+> 为 Claude Code / Codex 设计的轻量反向代理。根据模型名自动将请求路由到不同的 LLM 后端，会话内通过 `/model` 一键切换，无需重启。
 >
 > [English](./README.en.md)
 
 ## 特性
 
-- **多后端路由** — 通过可配置的正则表达式将模型路由到任意数量的 Anthropic 兼容后端（DeepSeek、OpenRouter 等）
+- **多后端路由** — 通过可配置的正则表达式将模型路由到任意数量的后端（Anthropic、OpenAI Chat/Responses、DeepSeek 等）
 - **零依赖** — 仅使用 Node.js 内置模块
 - **热重载** — 编辑 `config.json` 无需重启代理
 - **配置校验** — 无效配置时给出清晰的错误信息
@@ -16,8 +16,8 @@
 
 ```
 ┌─────────────┐     POST /v1/messages     ┌──────────────────┐
-│  Claude     │ ────────────────────────── │  cmr (端口 3457) │
-│  Code       │  ANTHROPIC_BASE_URL=       │                  │
+│  Claude /   │ ────────────────────────── │  cmr (端口 3457) │
+│  Codex      │  Base URL 指向本地代理      │                  │
 │  (任意      │  http://127.0.0.1:3457     │  从请求中读取    │
 │   会话)     │                            │  模型名          │
 └─────────────┘                            └────────┬─────────┘
@@ -69,13 +69,22 @@ npm install -g .
       "url": "https://api.deepseek.com",
       "apiKey": "sk-your-deepseek-key",
       "path": "/anthropic/v1/messages",
-      "modelPattern": "^deepseek-"
+      "modelPattern": "^deepseek-",
+      "protocol": "anthropic"
     },
     "claude": {
       "url": "https://api.anthropic.com",
       "apiKey": "sk-ant-your-key",
       "path": "/v1/messages",
-      "modelPattern": "^claude-"
+      "modelPattern": "^claude-",
+      "protocol": "anthropic"
+    },
+    "ollama": {
+      "url": "http://127.0.0.1:11434",
+      "apiKey": "ollama",
+      "path": "/v1/chat/completions",
+      "modelPattern": "^qwen3-coder:",
+      "protocol": "openai-chat"
     }
   },
   "aliases": {
@@ -83,7 +92,17 @@ npm install -g .
     "dsf": "deepseek-v4-flash",
     "opus": "claude-opus-4-7",
     "sonnet": "claude-sonnet-4-6",
-    "haiku": "claude-haiku-4-5"
+    "haiku": "claude-haiku-4-5",
+    "local": "qwen3-coder:30b",
+    "qwen": "qwen3-coder:30b"
+  },
+  "routingTags": {
+    "gpt55": "gpt-5.5",
+    "dsp": "deepseek-v4-pro",
+    "dsf": "deepseek-v4-flash",
+    "opus4.8": "claude-opus-4-8",
+    "local": "qwen3-coder:30b",
+    "qwen": "qwen3-coder:30b"
   }
 }
 ```
@@ -96,6 +115,7 @@ npm install -g .
 | `apiKey` | 是 | — | 认证 API 密钥 |
 | `path` | 否 | `/v1/messages` | 转发到后端的请求路径 |
 | `modelPattern` | 否 | — | 匹配模型名的正则表达式 |
+| `protocol` | 否 | `anthropic` | 请求族：`anthropic`、`openai-chat`、`openai-responses` |
 | `sanitizer` | 否 | `"none"` | 请求净化器（`"deepseek"` 剥离 `thinking` 字段并规范化 `tool_choice`） |
 
 ### 环境变量覆盖
@@ -105,9 +125,34 @@ npm install -g .
 | `CMR_PORT` | `config.port` |
 | `CMR_DEEPSEEK_KEY` | `config.backends.deepseek.apiKey` |
 | `CMR_CLAUDE_KEY` | `config.backends.claude.apiKey` |
+| `CMR_OLLAMA_KEY` | `config.backends.ollama.apiKey` |
 | `CMR_LOG_LEVEL` | `config.logLevel` |
 
-后端专属环境变量仅影响名为 `deepseek` 或 `claude` 的后端（向后兼容）。
+后端专属环境变量仅影响名为 `deepseek`、`claude` 或 `ollama` 的后端（向后兼容）。
+
+## 本地模型示例
+
+如果你在本机运行 `Ollama`，可以直接把本地模型并入同一个路由层：
+
+```json
+{
+  "backends": {
+    "ollama": {
+      "url": "http://127.0.0.1:11434",
+      "apiKey": "ollama",
+      "path": "/v1/chat/completions",
+      "modelPattern": "^qwen3-coder:",
+      "protocol": "openai-chat"
+    }
+  },
+  "routingTags": {
+    "local": "qwen3-coder:30b",
+    "qwen": "qwen3-coder:30b"
+  }
+}
+```
+
+这样在 prompt 里写 `cmr:local` 或 `cmr:qwen`，请求就会改走本机 Ollama，而不需要改客户端配置或重启会话。
 
 ## 使用
 
@@ -124,23 +169,48 @@ cmr restart   # 重启
 cmr run       # 通过模型流水线运行任务
 ```
 
-然后在 Claude Code 设置中添加（`~/.claude/settings.json`）：
+然后在 Claude Code 或 Codex 设置中把代理地址指向本地代理：
+
+Claude Code：
 
 ```json
-"env": {
-  "ANTHROPIC_BASE_URL": "http://127.0.0.1:3457"
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:3457"
+  }
 }
 ```
 
-现在可以用 `/model` 在会话内自由切换模型：
+Codex（用户级 `~/.codex/config.toml`）：
+
+```toml
+openai_base_url = "http://127.0.0.1:3457"
+```
+
+现在可以用 `/model` 在会话内自由切换模型；Codex 会话内切模型，但 provider/base URL 仍指向这个本地代理：
 
 ```
+/model g55    → gpt-5.5         via OpenAI-compatible proxy
 /model opus   → claude-opus-4-7  via api.anthropic.com      (复杂任务)
 /model dsp    → deepseek-v4-pro  via api.deepseek.com  (日常主力)
 /model dsf    → deepseek-v4-flash via api.deepseek.com (便宜快速)
 /model sonnet → claude-sonnet-4-6 via api.anthropic.com      (均衡)
 /model haiku  → claude-haiku-4-5  via api.anthropic.com      (轻量)
 ```
+
+### prompt 分流
+
+在 prompt 里写 `cmr:<tag>` 可以覆盖这次任务使用的真实模型，并自动剥离控制标签后再转发。
+
+示例：
+
+```text
+cmr:dsp 请分析这个报错
+cmr:opus4.8 修这个 bug
+```
+
+`tag` 优先从配置里的 `routingTags` 解析；若未定义，则回退到 `aliases` 以兼容旧配置。该功能默认不启用任何本机 Codex 配置，只是代理层按标签分流。
+建议把 `cmr:<tag>` 放在这次任务最新用户输入的开头。
 
 ## v0.3.0 新功能
 
@@ -212,7 +282,7 @@ cmr stats  # 查看故障计数和降级状态
 
 ## 自定义别名
 
-编辑配置中的 `aliases` 字段：
+编辑配置中的 `aliases` 字段，供 `/model` 等会话内切换使用：
 
 ```json
 {
@@ -224,12 +294,29 @@ cmr stats  # 查看故障计数和降级状态
 }
 ```
 
+## 自定义 prompt 标签
+
+编辑配置中的 `routingTags` 字段，供 `cmr:<tag>` 这类单次任务标签使用：
+
+```json
+{
+  "routingTags": {
+    "gpt55": "gpt-5.5",
+    "dsp": "deepseek-v4-pro",
+    "dsf": "deepseek-v4-flash",
+    "opus4.8": "claude-opus-4-8"
+  }
+}
+```
+
+`routingTags` 优先于 `aliases`；旧配置仍可继续用 `aliases` 做兼容。
+
 ## 从 v0.1.x 升级
 
 cmr v0.3.0 完全向后兼容 v0.1.x 和 v0.2.x 的配置。首次加载时：
 
 1. 旧 `backends` 格式（仅含 `url` + `apiKey`）自动迁移为新格式，补充默认的 `path`、`modelPattern` 和 `sanitizer`
-2. 环境变量 `CMR_DEEPSEEK_KEY` 和 `CMR_CLAUDE_KEY` 仍然有效
+2. 环境变量 `CMR_DEEPSEEK_KEY`、`CMR_CLAUDE_KEY` 和 `CMR_OLLAMA_KEY` 仍然有效
 3. 日志现在显示后端 URL 主机名，而非硬编码的服务名
 4. 热重载监视器自动激活 —— 无需额外配置
 
