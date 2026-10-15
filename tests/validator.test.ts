@@ -8,10 +8,11 @@ describe('validateConfig', () => {
       port: 3457,
       logLevel: 'info',
       backends: {
-        claude: { url: 'https://api.anthropic.com', apiKey: 'sk-test' },
-        deepseek: { url: 'https://api.deepseek.com', apiKey: 'sk-test' },
+        claude: { url: 'https://api.anthropic.com', apiKey: 'sk-test', protocol: 'anthropic' },
+        deepseek: { url: 'https://api.deepseek.com', apiKey: 'sk-test', protocol: 'openai-chat' },
       },
       aliases: { opus: 'claude-opus-4-7' },
+      routingTags: { dsp: 'deepseek-v4-pro' },
     });
     assert.strictEqual(errors.length, 0);
   });
@@ -69,6 +70,76 @@ describe('validateConfig', () => {
     assert.ok(errors.some((e) => e.field === 'backends.broken'));
   });
 
+  it('rejects invalid backend protocol', () => {
+    const errors = validateConfig({
+      port: 3457,
+      backends: {
+        proxy: {
+          url: 'https://proxy.example.com',
+          apiKey: 'k',
+          protocol: 'responses',
+        },
+      },
+    });
+    assert.ok(errors.some((e) => e.field === 'backends.proxy.protocol'));
+  });
+
+  it('rejects non-string defaultModel values', () => {
+    const errors = validateConfig({
+      port: 3457,
+      backends: {
+        local: {
+          url: 'http://127.0.0.1:11434',
+          apiKey: 'ollama',
+          defaultModel: 123,
+        },
+      },
+    });
+    assert.ok(errors.some((e) => e.field === 'backends.local.defaultModel'));
+  });
+
+  it('rejects non-boolean forwardAuthorization values', () => {
+    const errors = validateConfig({
+      port: 3457,
+      backends: {
+        proxy: {
+          url: 'https://proxy.example.com',
+          apiKey: 'k',
+          forwardAuthorization: 'yes',
+        },
+      },
+    });
+    assert.ok(errors.some((e) => e.field === 'backends.proxy.forwardAuthorization'));
+  });
+
+  it('rejects non-boolean fallback values', () => {
+    const errors = validateConfig({
+      port: 3457,
+      backends: {
+        proxy: {
+          url: 'https://proxy.example.com',
+          apiKey: 'k',
+          fallback: 'no',
+        },
+      },
+    });
+    assert.ok(errors.some((e) => e.field === 'backends.proxy.fallback'));
+  });
+
+  it('rejects invalid upstreamProtocol values', () => {
+    const errors = validateConfig({
+      port: 3457,
+      backends: {
+        proxy: {
+          url: 'https://proxy.example.com',
+          apiKey: 'k',
+          upstreamProtocol: 'messages',
+        },
+      },
+    });
+    assert.ok(errors.some((e) => e.field === 'backends.proxy.upstreamProtocol'));
+  });
+
   it('rejects invalid aliases type', () => {
     const errors = validateConfig({
       port: 3457,
@@ -76,6 +147,26 @@ describe('validateConfig', () => {
       aliases: 'not-an-object',
     });
     assert.ok(errors.some((e) => e.field === 'aliases'));
+  });
+
+  it('rejects invalid routingTags type', () => {
+    const errors = validateConfig({
+      port: 3457,
+      backends: { claude: { url: 'https://api.anthropic.com', apiKey: 'k' } },
+      routingTags: 'not-an-object',
+    });
+    assert.ok(errors.some((e) => e.field === 'routingTags'));
+  });
+
+  it('rejects non-string routingTags values', () => {
+    const errors = validateConfig({
+      port: 3457,
+      backends: { claude: { url: 'https://api.anthropic.com', apiKey: 'k' } },
+      routingTags: {
+        dsp: 123,
+      },
+    });
+    assert.ok(errors.some((e) => e.field === 'routingTags.dsp'));
   });
 
   it('collects multiple errors', () => {

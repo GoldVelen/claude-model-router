@@ -14,8 +14,6 @@ const DEFAULT_ALIASES: Record<string, string> = {
   opus: 'claude-opus-4-7',
   sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5',
-  local: 'qwen3-coder:30b',
-  qwen: 'qwen3-coder:30b',
 };
 
 function createDefaultConfig(): Config {
@@ -37,13 +35,6 @@ function createDefaultConfig(): Config {
         path: '/v1/messages',
         modelPattern: '^claude-',
         protocol: 'anthropic' as const,
-      },
-      ollama: {
-        url: 'http://127.0.0.1:11434',
-        apiKey: 'ollama',
-        path: '/v1/chat/completions',
-        modelPattern: '^(qwen3-coder:|qwen2\\.5-coder:|llama3\\.|codellama|deepseek-coder|local/)',
-        protocol: 'openai-chat' as const,
       },
     },
     aliases: { ...DEFAULT_ALIASES },
@@ -116,6 +107,9 @@ function applyEnvOverrides(config: Config): Config {
   if (backends['ollama'] && process.env['CMR_OLLAMA_KEY']) {
     backends['ollama'] = { ...backends['ollama'], apiKey: process.env['CMR_OLLAMA_KEY'] };
   }
+  if (backends['ollamaResponses'] && process.env['CMR_OLLAMA_KEY']) {
+    backends['ollamaResponses'] = { ...backends['ollamaResponses'], apiKey: process.env['CMR_OLLAMA_KEY'] };
+  }
 
   return {
     ...config,
@@ -135,10 +129,29 @@ function migrateBackends(backends: Record<string, Record<string, unknown>>): Rec
       migrated[name].protocol = migrated[name].protocol || 'anthropic';
       migrated[name].sanitizer = migrated[name].sanitizer || 'deepseek';
     }
+    if (name === 'deepseekResponses') {
+      migrated[name].path = migrated[name].path || '/v1/chat/completions';
+      migrated[name].modelPattern = migrated[name].modelPattern || '^deepseek-';
+      migrated[name].protocol = migrated[name].protocol || 'openai-responses';
+      migrated[name].sanitizer = migrated[name].sanitizer || 'deepseek';
+    }
     if (name === 'claude' && !migrated[name].path) {
       migrated[name].path = '/v1/messages';
       migrated[name].modelPattern = migrated[name].modelPattern || '^claude-';
       migrated[name].protocol = migrated[name].protocol || 'anthropic';
+    }
+    if (name === 'ollama') {
+      migrated[name].path = migrated[name].path || '/v1/chat/completions';
+      migrated[name].modelPattern = migrated[name].modelPattern || '^(qwen3-coder:|qwen2\\.5-coder:|llama3\\.|codellama|deepseek-coder|local/)';
+      migrated[name].protocol = migrated[name].protocol || 'openai-chat';
+    }
+    if (name === 'ollamaResponses') {
+      if (!migrated[name].path || migrated[name].path === '/v1/responses') {
+        migrated[name].path = '/v1/chat/completions';
+      }
+      migrated[name].modelPattern = migrated[name].modelPattern || '^(qwen3-coder:|qwen2\\.5-coder:|llama3\\.|codellama|deepseek-coder|local/)';
+      migrated[name].defaultModel = migrated[name].defaultModel || 'qwen3-coder:30b';
+      migrated[name].protocol = migrated[name].protocol || 'openai-responses';
     }
     if (!migrated[name].protocol) {
       if (String(migrated[name].path || '').includes('/chat/completions')) {
@@ -155,7 +168,12 @@ function migrateBackends(backends: Record<string, Record<string, unknown>>): Rec
 
 export function loadConfig(): Config {
   const base = readOrCreateConfig();
-  return applyEnvOverrides(base);
+  const migratedBackends = migrateBackends(base.backends as unknown as Record<string, Record<string, unknown>>);
+  const normalized = {
+    ...base,
+    backends: migratedBackends as unknown as Config['backends'],
+  };
+  return applyEnvOverrides(normalized);
 }
 
 let currentConfig: Config | null = null;

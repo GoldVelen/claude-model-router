@@ -276,6 +276,24 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+    timeout.unref?.();
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      },
+    );
+  });
+}
+
 export async function runPipeline(
   task: string,
   config: Config,
@@ -325,12 +343,7 @@ export async function runPipeline(
     const startTime = Date.now();
 
     try {
-      const result = await Promise.race([
-        callModel(model, prompt, { port, timeout: stageTimeout }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), stageTimeout)
-        ),
-      ]);
+      const result = await withTimeout(callModel(model, prompt, { port, timeout: stageTimeout }), stageTimeout);
 
       const duration = Date.now() - startTime;
       process.stderr.write(`[${num}/${total}] ${name} completed in ${formatDuration(duration)}\n`);

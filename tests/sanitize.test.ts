@@ -3,7 +3,17 @@ import assert from 'node:assert';
 import { sanitizeForDeepseek } from '../src/sanitize.js';
 
 describe('sanitizeForDeepseek', () => {
-  it('removes thinking field', () => {
+  it('translates thinking=false to DeepSeek disabled thinking options', () => {
+    const body = JSON.stringify({
+      model: 'deepseek-v4-pro',
+      thinking: false,
+      messages: [],
+    });
+    const result = JSON.parse(sanitizeForDeepseek(body));
+    assert.deepStrictEqual(result.thinking, { type: 'disabled' });
+  });
+
+  it('removes unsupported thinking objects', () => {
     const body = JSON.stringify({
       model: 'deepseek-v4-pro',
       thinking: { type: 'enabled', budget_tokens: 16000 },

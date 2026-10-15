@@ -45,7 +45,22 @@ describe('loadConfig', () => {
     assert.strictEqual(config.backends.claude.apiKey, 'cl-key-env');
   });
 
-  it('reads CMR_OLLAMA_KEY from env', async () => {
+  it('reads CMR_OLLAMA_KEY from env when a local backend is explicitly configured', async () => {
+    writeFileSync(TEST_CONFIG_PATH, JSON.stringify({
+      port: 3457,
+      logLevel: 'info',
+      backends: {
+        ollama: {
+          url: 'http://127.0.0.1:11434',
+          apiKey: 'ollama-config',
+          path: '/v1/chat/completions',
+          modelPattern: '^qwen3-coder:',
+          protocol: 'openai-chat',
+        },
+      },
+      aliases: {},
+    }), 'utf-8');
+
     process.env['CMR_OLLAMA_KEY'] = 'ollama-env';
     const { loadConfig } = await import('../src/config.js');
     const config = loadConfig();
@@ -60,14 +75,21 @@ describe('loadConfig', () => {
     assert.strictEqual(config.aliases['dsf'], 'deepseek-v4-flash');
     assert.strictEqual(config.aliases['sonnet'], 'claude-sonnet-4-6');
     assert.strictEqual(config.aliases['haiku'], 'claude-haiku-4-5');
-    assert.strictEqual(config.aliases['local'], 'qwen3-coder:30b');
-    assert.strictEqual(config.aliases['qwen'], 'qwen3-coder:30b');
+    assert.strictEqual(config.aliases['local'], undefined);
+    assert.strictEqual(config.aliases['qwen'], undefined);
   });
 
   it('has empty routingTags by default', async () => {
     const { loadConfig } = await import('../src/config.js');
     const config = loadConfig();
     assert.deepStrictEqual(config.routingTags, {});
+  });
+
+  it('does not enable local backends by default', async () => {
+    const { loadConfig } = await import('../src/config.js');
+    const config = loadConfig();
+    assert.strictEqual(config.backends.ollama, undefined);
+    assert.strictEqual(config.backends.ollamaResponses, undefined);
   });
 
   it('merges new default backends and aliases into existing config', async () => {
@@ -91,9 +113,30 @@ describe('loadConfig', () => {
 
     const { loadConfig } = await import('../src/config.js');
     const config = loadConfig();
-    assert.ok(config.backends.ollama);
-    assert.strictEqual(config.backends.ollama.url, 'http://127.0.0.1:11434');
-    assert.strictEqual(config.aliases['local'], 'qwen3-coder:30b');
-    assert.strictEqual(config.aliases['qwen'], 'qwen3-coder:30b');
+    assert.strictEqual(config.backends.ollama, undefined);
+    assert.strictEqual(config.backends.ollamaResponses, undefined);
+    assert.strictEqual(config.aliases['local'], undefined);
+    assert.strictEqual(config.aliases['qwen'], undefined);
+  });
+
+  it('auto-applies the deepseek sanitizer to deepseek responses backends', async () => {
+    writeFileSync(TEST_CONFIG_PATH, JSON.stringify({
+      port: 3457,
+      logLevel: 'info',
+      backends: {
+        deepseekResponses: {
+          url: 'https://api.deepseek.com',
+          apiKey: 'test-ds-key',
+          path: '/v1/chat/completions',
+          modelPattern: '^deepseek-',
+          protocol: 'openai-responses',
+        },
+      },
+      aliases: {},
+    }), 'utf-8');
+
+    const { loadConfig } = await import('../src/config.js');
+    const config = loadConfig();
+    assert.strictEqual(config.backends.deepseekResponses?.sanitizer, 'deepseek');
   });
 });

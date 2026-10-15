@@ -1,8 +1,9 @@
 import http from 'node:http';
 import https from 'node:https';
-import { type BackendConfig } from './types.js';
-import { resolveModel, selectBackends } from './router.js';
+import { type BackendConfig, type BackendProtocol } from './types.js';
+import { getDefaultPath, getUpstreamProtocol, rewriteBodyForCmrTag, selectBackends } from './router.js';
 import { sanitizeForDeepseek } from './sanitize.js';
+import { prepareProxyRequest, relayProxyResponse } from './openai-compat.js';
 import { getConfig } from './config.js';
 import { handleStatsRoute } from './server/routes/stats.js';
 import { handleLogsRoute } from './server/routes/logs.js';
@@ -18,14 +19,36 @@ import { statsMiddleware } from './stats/stats-middleware.js';
 type ProxyResult = { success: false; statusCode: number; error?: string }
   | { success: true; res: http.IncomingMessage };
 
+function extractUpstreamError(rawBody: string): string {
+  if (!rawBody.trim()) return '';
+
+  try {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+    const error = parsed['error'];
+    if (typeof error === 'string') return error;
+    if (error && typeof error === 'object') {
+      const message = (error as Record<string, unknown>)['message'];
+      if (typeof message === 'string') return message;
+    }
+  } catch {
+    /* ignore parse errors and fall back to raw text */
+  }
+
+  return rawBody.trim();
+}
+
 function doProxyRequest(
   backend: BackendConfig,
   path: string,
   body: string,
+  forwardedAuthorization?: string,
 ): Promise<ProxyResult> {
   return new Promise((resolve) => {
     const url = new URL(backend.url);
     const isSecure = url.protocol === 'https:';
+    const authorization = backend.forwardAuthorization && forwardedAuthorization
+      ? forwardedAuthorization
+      : `Bearer ${backend.apiKey}`;
     const opts: http.RequestOptions = {
       hostname: url.hostname,
       port: url.port || (isSecure ? 443 : 80),
@@ -33,10 +56,15 @@ function doProxyRequest(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${backend.apiKey}`,
-        'anthropic-version': '2023-06-01',
+        Authorization: authorization,
       },
     };
+    if (getUpstreamProtocol(backend) === 'anthropic') {
+      opts.headers = {
+        ...opts.headers,
+        'anthropic-version': '2023-06-01',
+      };
+    }
 
     const startTime = Date.now();
     const lib = isSecure ? https : http;
@@ -48,8 +76,19 @@ function doProxyRequest(
       }
 
       if (proxyRes.statusCode && proxyRes.statusCode >= 400) {
-        proxyRes.resume();
-        resolve({ success: false, statusCode: proxyRes.statusCode, error: `HTTP ${proxyRes.statusCode}` });
+        let upstreamBody = '';
+        proxyRes.setEncoding('utf8');
+        proxyRes.on('data', (chunk) => (upstreamBody += chunk));
+        proxyRes.on('end', () => {
+          const details = extractUpstreamError(upstreamBody);
+          const suffix = details ? `: ${details}` : '';
+          const statusCode = proxyRes.statusCode ?? 502;
+          resolve({
+            success: false,
+            statusCode,
+            error: `HTTP ${proxyRes.statusCode}${suffix}`,
+          });
+        });
         return;
       }
 
@@ -68,17 +107,22 @@ function doProxyRequest(
   });
 }
 
-function pipeProxyResponse(proxyRes: http.IncomingMessage, clientRes: http.ServerResponse): void {
-  const headers = { ...proxyRes.headers };
-  delete headers['content-encoding'];
-  clientRes.writeHead(proxyRes.statusCode ?? 502, headers);
-  proxyRes.pipe(clientRes);
-}
-
 function findBackendName(backend: BackendConfig): string {
   const config = getConfig();
   for (const [name, b] of Object.entries(config.backends)) {
-    if (b.url === backend.url) return name;
+    if (b === backend) return name;
+    if (
+      b.url === backend.url
+      && b.path === backend.path
+      && b.apiKey === backend.apiKey
+      && b.modelPattern === backend.modelPattern
+      && b.defaultModel === backend.defaultModel
+      && b.protocol === backend.protocol
+      && b.upstreamProtocol === backend.upstreamProtocol
+      && b.sanitizer === backend.sanitizer
+    ) {
+      return name;
+    }
   }
   return 'unknown';
 }
@@ -100,6 +144,13 @@ export function createServer(): http.Server {
       return;
     }
 
+    const requestPath = req.url ?? '';
+    const protocol = getRequestProtocol(requestPath);
+    if (!protocol) {
+      res.writeHead(404).end();
+      return;
+    }
+
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', async () => {
@@ -107,17 +158,17 @@ export function createServer(): http.Server {
         const config = getConfig();
         const parsed = JSON.parse(body) as { model?: string };
         const rawModel = parsed.model ?? '';
-        const resolvedModel = resolveModel(rawModel, config.aliases);
+        const { resolvedModel, rewrittenBody } = rewriteBodyForCmrTag(body, config.routingTags, config.aliases);
+        const inboundAuthorization = typeof req.headers.authorization === 'string'
+          ? req.headers.authorization
+          : undefined;
 
-        let forwarded = body;
-        if (resolvedModel !== rawModel) {
-          forwarded = body.replace(`"${rawModel}"`, `"${resolvedModel}"`);
-        }
-
-        const backends = selectBackends(resolvedModel, config.backends);
+        const backends = selectBackends(resolvedModel, config.backends, protocol);
         if (backends.length === 0) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: { message: `No backend configured for model: ${resolvedModel}` } }));
+          res.end(JSON.stringify({
+            error: { message: `No backend configured for model: ${resolvedModel} (${protocol})` },
+          }));
           return;
         }
 
@@ -130,14 +181,16 @@ export function createServer(): http.Server {
         const errors: string[] = [];
         for (const backend of backends) {
           const backendName = findBackendName(backend);
-          const path = backend.path || '/v1/messages';
-          const actualBody = backend.sanitizer === 'deepseek' ? sanitizeForDeepseek(forwarded) : forwarded;
+          const prepared = prepareProxyRequest(backend, protocol, rewrittenBody, getDefaultPath(protocol));
+          const actualBody = backend.sanitizer === 'deepseek'
+            ? sanitizeForDeepseek(prepared.body)
+            : prepared.body;
 
-          const result = await doProxyRequest(backend, path, actualBody);
+          const result = await doProxyRequest(backend, prepared.path, actualBody, inboundAuthorization);
 
           if (result.success) {
             statsMiddleware(req, res, backendName);
-            pipeProxyResponse(result.res, res);
+            await relayProxyResponse(result.res, res, prepared.responseAdapter);
             return;
           }
 
@@ -169,4 +222,11 @@ export function createServer(): http.Server {
       }
     });
   });
+}
+
+function getRequestProtocol(path: string): BackendProtocol | null {
+  if (path === '/v1/messages') return 'anthropic';
+  if (path === '/v1/chat/completions' || path === '/chat/completions') return 'openai-chat';
+  if (path === '/v1/responses' || path === '/responses') return 'openai-responses';
+  return null;
 }

@@ -165,6 +165,39 @@ describe('Router: selectBackends filters degraded', () => {
     const result = selectBackends('test-model', backends);
     assert.strictEqual(result.length, 0);
   });
+
+  it('still returns an explicitly matched degraded backend before giving up', () => {
+    recordFailure('good', 'e1');
+    recordFailure('good', 'e2');
+    recordFailure('good', 'e3');
+
+    const backends = { good, bad };
+    const result = selectBackends('good-model', backends);
+    assert.strictEqual(result.length, 2);
+    assert.strictEqual(result[0]!.url, 'https://good.example.com');
+    assert.strictEqual(result[1]!.url, 'https://bad.example.com');
+  });
+
+  it('does not use fallback-disabled local backends for unmatched default models', () => {
+    const remote: BackendConfig = {
+      url: 'https://remote.example.com',
+      apiKey: 'remote',
+      modelPattern: '^gpt-5\\.',
+      protocol: 'openai-responses',
+      fallback: false,
+    };
+    const local: BackendConfig = {
+      url: 'http://127.0.0.1:11434',
+      apiKey: 'local',
+      modelPattern: '^qwen3-coder:',
+      protocol: 'openai-responses',
+      fallback: false,
+    };
+
+    const result = selectBackends('gpt-5.5', { remote, local }, 'openai-responses');
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0]!.url, 'https://remote.example.com');
+  });
 });
 
 describe('Server: auto fallback retry loop', () => {

@@ -3,6 +3,8 @@ export interface ValidationError {
   message: string;
 }
 
+const VALID_PROTOCOLS = new Set(['anthropic', 'openai-chat', 'openai-responses']);
+
 export function validateConfig(config: Record<string, unknown>): ValidationError[] {
   const errors: ValidationError[] = [];
 
@@ -33,6 +35,32 @@ export function validateConfig(config: Record<string, unknown>): ValidationError
       if (typeof backend.apiKey !== 'string') {
         errors.push({ field: `backends.${name}.apiKey`, message: 'must be a string' });
       }
+
+      if (backend.defaultModel !== undefined && typeof backend.defaultModel !== 'string') {
+        errors.push({ field: `backends.${name}.defaultModel`, message: 'must be a string' });
+      }
+
+      if (backend.fallback !== undefined && typeof backend.fallback !== 'boolean') {
+        errors.push({ field: `backends.${name}.fallback`, message: 'must be a boolean' });
+      }
+
+      if (backend.forwardAuthorization !== undefined && typeof backend.forwardAuthorization !== 'boolean') {
+        errors.push({ field: `backends.${name}.forwardAuthorization`, message: 'must be a boolean' });
+      }
+
+      if (backend.protocol !== undefined && !VALID_PROTOCOLS.has(String(backend.protocol))) {
+        errors.push({
+          field: `backends.${name}.protocol`,
+          message: 'must be one of anthropic, openai-chat, openai-responses',
+        });
+      }
+
+      if (backend.upstreamProtocol !== undefined && !VALID_PROTOCOLS.has(String(backend.upstreamProtocol))) {
+        errors.push({
+          field: `backends.${name}.upstreamProtocol`,
+          message: 'must be one of anthropic, openai-chat, openai-responses',
+        });
+      }
     }
 
     if (Object.keys(backends).length === 0) {
@@ -42,6 +70,18 @@ export function validateConfig(config: Record<string, unknown>): ValidationError
 
   if (config.aliases !== undefined && typeof config.aliases !== 'object') {
     errors.push({ field: 'aliases', message: 'must be an object' });
+  }
+
+  if (config.routingTags !== undefined) {
+    if (typeof config.routingTags !== 'object' || config.routingTags === null || Array.isArray(config.routingTags)) {
+      errors.push({ field: 'routingTags', message: 'must be an object' });
+    } else {
+      for (const [tag, model] of Object.entries(config.routingTags as Record<string, unknown>)) {
+        if (typeof model !== 'string') {
+          errors.push({ field: `routingTags.${tag}`, message: 'must be a string' });
+        }
+      }
+    }
   }
 
   return errors;

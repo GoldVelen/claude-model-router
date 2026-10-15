@@ -75,6 +75,38 @@ describe('E2E: route handlers', () => {
         return;
       }
 
+      if ((url === '/v1/chat/completions' || url === '/chat/completions') && req.method === 'POST') {
+        let body = '';
+        req.on('data', (c) => (body += c));
+        req.on('end', () => {
+          const parsed = JSON.parse(body);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'chatcmpl-1',
+            object: 'chat.completion',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+            model: parsed.model,
+          }));
+        });
+        return;
+      }
+
+      if ((url === '/v1/responses' || url === '/responses') && req.method === 'POST') {
+        let body = '';
+        req.on('data', (c) => (body += c));
+        req.on('end', () => {
+          const parsed = JSON.parse(body);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'resp-openai-1',
+            object: 'response',
+            output_text: 'ok',
+            model: parsed.model,
+          }));
+        });
+        return;
+      }
+
       res.writeHead(404);
       res.end('Not found');
     });
@@ -130,5 +162,29 @@ describe('E2E: route handlers', () => {
     const parsed = JSON.parse(res.data);
     assert.strictEqual(parsed.id, 'resp-1');
     assert.strictEqual(parsed.model, 'test-model-1');
+  });
+
+  it('POST /v1/chat/completions returns OpenAI-style response', async () => {
+    const res = await postJson(port, '/v1/chat/completions', {
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    assert.strictEqual(res.status, 200);
+    const parsed = JSON.parse(res.data);
+    assert.strictEqual(parsed.object, 'chat.completion');
+    assert.strictEqual(parsed.model, 'gpt-5.5');
+    assert.strictEqual(parsed.choices[0]?.message?.content, 'ok');
+  });
+
+  it('POST /v1/responses returns Responses-style response', async () => {
+    const res = await postJson(port, '/v1/responses', {
+      model: 'gpt-5.5',
+      input: 'hi',
+    });
+    assert.strictEqual(res.status, 200);
+    const parsed = JSON.parse(res.data);
+    assert.strictEqual(parsed.object, 'response');
+    assert.strictEqual(parsed.model, 'gpt-5.5');
+    assert.strictEqual(parsed.output_text, 'ok');
   });
 });

@@ -3,6 +3,7 @@ import { createServer } from './server.js';
 import { startConfigWatcher } from './watcher.js';
 import { ensureBackends } from './stats/stats-store.js';
 import { checkForUpdate } from './utils/update-checker.js';
+import { formatModelRouteLine } from './startup-summary.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,20 +24,21 @@ checkForUpdate(pkg.version).then((result) => {
 });
 
 server.listen(config.port, () => {
-  const deepseekBackend = Object.values(config.backends).find((b) => b.modelPattern?.includes('deepseek'));
-  const deepseekHost = deepseekBackend ? new URL(deepseekBackend.url).hostname : 'unknown';
-  const claudeBackend = Object.values(config.backends).find((b) => b.modelPattern?.includes('claude'));
-  const claudeHost = claudeBackend ? new URL(claudeBackend.url).hostname : 'unknown';
-
   console.log(`claude-model-router ready on :${config.port}`);
   console.log('');
   console.log('  Aliases:');
   for (const [alias, model] of Object.entries(config.aliases)) {
-    const hostname = model.startsWith('claude-') ? claudeHost : deepseekHost;
-    console.log(`    ${alias.padEnd(8)} → ${model.padEnd(24)} → ${hostname}`);
+    console.log(formatModelRouteLine(alias, model, config));
+  }
+  if (config.routingTags && Object.keys(config.routingTags).length > 0) {
+    console.log('');
+    console.log('  Prompt routing tags:');
+    for (const [tag, model] of Object.entries(config.routingTags)) {
+      console.log(formatModelRouteLine(tag, model, config, 'openai-responses'));
+    }
   }
   console.log('');
-  console.log('  Set ANTHROPIC_BASE_URL=http://127.0.0.1:3457 in Claude Code settings');
+  console.log(`  Set ANTHROPIC_BASE_URL=http://127.0.0.1:${config.port} in Claude Code settings`);
 });
 
 const watcher = startConfigWatcher(getConfigPath(), reloadConfig);

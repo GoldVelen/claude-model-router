@@ -62,8 +62,16 @@ describe('Pipeline abort via AbortSignal', () => {
     port = mock.port;
   });
 
-  afterEach(() => {
-    server.close();
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+    });
   });
 
   it('aborts after first stage when signal is triggered early', async () => {

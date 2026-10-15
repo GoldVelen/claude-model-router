@@ -186,6 +186,82 @@ describe('routeRequest', () => {
     assert.strictEqual(JSON.parse(result.body).model, 'qwen3-coder:30b');
   });
 
+  it('routes responses requests to an ollama responses backend', () => {
+    const config = makeConfig({
+      backends: {
+        ollamaResponses: {
+          url: 'http://127.0.0.1:11434',
+          apiKey: 'ollama-key',
+          path: '/v1/responses',
+          modelPattern: '^qwen3-coder:',
+          protocol: 'openai-responses',
+        },
+      },
+      aliases: {
+        local: 'qwen3-coder:30b',
+      },
+      routingTags: {
+        local: 'qwen3-coder:30b',
+      },
+    });
+    const body = JSON.stringify({
+      model: 'local',
+      input: 'cmr:local\n只回答 OK',
+    });
+    const result = routeRequest(config, body, 'openai-responses');
+    assert.strictEqual(result.url, 'http://127.0.0.1:11434');
+    assert.strictEqual(result.path, '/v1/responses');
+    assert.strictEqual(result.apiKey, 'ollama-key');
+    const parsed = JSON.parse(result.body);
+    assert.strictEqual(parsed.model, 'qwen3-coder:30b');
+    assert.strictEqual(parsed.input, '只回答 OK');
+  });
+
+  it('routes cmr tags inside responses input message arrays', () => {
+    const config = makeConfig({
+      backends: {
+        ccswitchResponses: {
+          url: 'https://sapi.rynai.xyz',
+          apiKey: '',
+          path: '/v1/responses',
+          modelPattern: '^gpt-',
+          protocol: 'openai-responses',
+          forwardAuthorization: true,
+        },
+        ollamaResponses: {
+          url: 'http://127.0.0.1:11434',
+          apiKey: 'ollama-key',
+          path: '/v1/chat/completions',
+          modelPattern: '^qwen3-coder:',
+          protocol: 'openai-responses',
+          defaultModel: 'qwen3-coder:30b',
+        },
+      },
+      aliases: {
+        gpt55: 'gpt-5.5',
+      },
+      routingTags: {
+        local: 'qwen3-coder:30b',
+      },
+    });
+    const body = JSON.stringify({
+      model: 'gpt55',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'cmr:local\n你是什么模型' }],
+        },
+      ],
+    });
+    const result = routeRequest(config, body, 'openai-responses');
+    const parsed = JSON.parse(result.body);
+    assert.strictEqual(result.url, 'http://127.0.0.1:11434');
+    assert.strictEqual(result.path, '/v1/chat/completions');
+    assert.strictEqual(parsed.model, 'qwen3-coder:30b');
+    assert.strictEqual(parsed.messages[0]?.content, '你是什么模型');
+  });
+
   it('uses default path for openai-chat backends when omitted', () => {
     const config = makeConfig({
       backends: {
@@ -453,6 +529,27 @@ describe('selectBackends', () => {
       },
     };
     const result = selectBackends('gpt-5.5', backends, 'openai-chat');
+    assert.strictEqual(result.length, 0);
+  });
+
+  it('does not use fallback-disabled backends for mismatched models', () => {
+    const backends: Record<string, BackendConfig> = {
+      claudeResponses: {
+        url: 'https://api.anthropic.com',
+        apiKey: 'cl-key',
+        modelPattern: '^claude-',
+        protocol: 'openai-responses',
+        fallback: false,
+      },
+      ollamaResponses: {
+        url: 'http://127.0.0.1:11434',
+        apiKey: 'ollama',
+        modelPattern: '^qwen3-coder:',
+        protocol: 'openai-responses',
+        fallback: false,
+      },
+    };
+    const result = selectBackends('gpt-5.5', backends, 'openai-responses');
     assert.strictEqual(result.length, 0);
   });
 });
